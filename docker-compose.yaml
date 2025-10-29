@@ -1,0 +1,79 @@
+services:
+  ryu:
+    build: ./ryu_controller  # Build từ Dockerfile trong thư mục ryu_controller
+    container_name: ryu_controller
+    ports:
+      - "6653:6653"   # OpenFlow protocol
+      - "8080:8080"   # Ryu REST API (if needed)
+      - "9090:9090"   # Prometheus metrics endpoint
+    networks:
+      - sdn_net
+
+  mininet:
+    build: ./mininet          # Build từ Dockerfile với Python 3 support
+    container_name: mininet
+    privileged: true          # Quyền này để quản lý giao diện mạng
+    tty: true                 # Giữ cho container chạy để có thể attach vào
+    stdin_open: true          # Cho phép tương tác với container
+    entrypoint: ["/bin/bash"]  # Override ENTRYPOINT để tránh conflict
+    volumes:
+      - ./mininet/spine_leaf.py:/app/spine_leaf.py:ro
+      - ./mininet/simulate_traffic.py:/app/simulate_traffic.py:ro
+      - ./mininet/auto_start.py:/app/auto_start.py:ro
+      - ./mininet/start_wrapper.sh:/app/start_wrapper.sh:ro
+      - /tmp/.X11-unix:/tmp/.X11-unix
+      - /lib/modules:/lib/modules
+    # Chọn một trong các mode sau (uncomment để sử dụng):
+    # Mode 1: Interactive - Khởi động network và vào CLI (mặc định)
+    #command: /app/start_wrapper.sh --mode interactive
+    # Mode 2: Continuous - Tự động chạy traffic liên tục
+    command: /app/start_wrapper.sh --mode continuous
+    # Mode 3: Demo - Chạy demo traffic rồi vào CLI
+    #command: /app/start_wrapper.sh --mode demo
+    # Mode 4: Mixed - Chạy mixed traffic 120s rồi vào CLI
+    #command: /app/start_wrapper.sh --mode mixed
+    # Mode 5: Không tự động (manual mode cũ - chỉ start OVS)
+    #command: -c "service openvswitch-switch start && tail -f /dev/null"
+    depends_on:
+      - ryu                   # Đảm bảo 'ryu' khởi động trước 'mininet'
+    networks:
+      - sdn_net
+
+  prometheus:
+    image: prom/prometheus:v3.7.2
+    container_name: prometheus
+    ports:
+      - "9091:9090"   # Prometheus UI (mapped to host 9091 to avoid conflict)
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--storage.tsdb.retention.time=200h'
+      - '--web.enable-lifecycle'
+      - '--web.enable-admin-api'
+    networks:
+      - sdn_net
+    volumes:
+      - ./prometheus/prometheus.yaml:/etc/prometheus/prometheus.yml
+      - ./prometheus/data:/prometheus
+    depends_on:
+      - ryu
+
+  grafana:
+    image: grafana/grafana:12.2.1
+    container_name: grafana
+    ports:
+      - "3000:3000"
+    networks:
+      - sdn_net
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning
+      - ./grafana/dashboards:/etc/grafana/dashboards
+      - ./grafana/data:/var/lib/grafana
+    depends_on:
+      - prometheus
+
+networks:
+  sdn_net:
+    driver: bridge

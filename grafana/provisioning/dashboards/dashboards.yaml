@@ -1,0 +1,13 @@
+apiVersion: 1
+
+providers:
+  - name: 'SDN Dashboards'
+    orgId: 1
+    folder: 'SDN Monitoring'
+    type: file
+    disableDeletion: false
+    editable: true
+    allowUiUpdates: true
+    options:
+      path: /etc/grafana/dashboards
+
