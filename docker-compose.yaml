@@ -4,8 +4,18 @@ services:
     container_name: ryu_controller
     ports:
       - "6653:6653"   # OpenFlow protocol
-      - "8080:8080"   # Ryu REST API (if needed)
-      - "9090:9090"   # Prometheus metrics endpoint
+      - "8080:8080"   # FlowManager
+      - "8000:8000"   # Prometheus metrics
+    command: ["ryu-manager", "--observe-links", "flowmanager/flowmanager.py", "/app/spine_leaf_controller.py"]
+    environment:
+      - NETWORK_CONFIG_FILE=/app/network_config.yaml
+      - METRICS_PORT=8000
+    volumes:
+      - ./network_config.yaml:/app/network_config.yaml
+      - ./ryu_controller/spine_leaf_controller.py:/app/spine_leaf_controller.py
+      - ./ryu_controller/base_switch.py:/app/base_switch.py
+      - ./ryu_controller/utils.py:/app/utils.py
+      - ./ryu_controller/metrics_exporter.py:/app/metrics_exporter.py
     networks:
       - sdn_net
 
@@ -16,24 +26,14 @@ services:
     tty: true                 # Giữ cho container chạy để có thể attach vào
     stdin_open: true          # Cho phép tương tác với container
     entrypoint: ["/bin/bash"]  # Override ENTRYPOINT để tránh conflict
+    environment:
+      - SDN_CONTROLLER=ryu
     volumes:
-      - ./mininet/spine_leaf.py:/app/spine_leaf.py:ro
-      - ./mininet/simulate_traffic.py:/app/simulate_traffic.py:ro
-      - ./mininet/auto_start.py:/app/auto_start.py:ro
-      - ./mininet/start_wrapper.sh:/app/start_wrapper.sh:ro
+      - ./network_config.yaml:/app/network_config.yaml
+      - ./mininet/spine_leaf.py:/app/spine_leaf.py
+      - ./mininet/traffic_generator.py:/app/traffic_generator.py
       - /tmp/.X11-unix:/tmp/.X11-unix
       - /lib/modules:/lib/modules
-    # Chọn một trong các mode sau (uncomment để sử dụng):
-    # Mode 1: Interactive - Khởi động network và vào CLI (mặc định)
-    #command: /app/start_wrapper.sh --mode interactive
-    # Mode 2: Continuous - Tự động chạy traffic liên tục
-    command: /app/start_wrapper.sh --mode continuous
-    # Mode 3: Demo - Chạy demo traffic rồi vào CLI
-    #command: /app/start_wrapper.sh --mode demo
-    # Mode 4: Mixed - Chạy mixed traffic 120s rồi vào CLI
-    #command: /app/start_wrapper.sh --mode mixed
-    # Mode 5: Không tự động (manual mode cũ - chỉ start OVS)
-    #command: -c "service openvswitch-switch start && tail -f /dev/null"
     depends_on:
       - ryu                   # Đảm bảo 'ryu' khởi động trước 'mininet'
     networks:
@@ -43,7 +43,7 @@ services:
     image: prom/prometheus:v3.7.2
     container_name: prometheus
     ports:
-      - "9091:9090"   # Prometheus UI (mapped to host 9091 to avoid conflict)
+      - "9090:9090"   # Prometheus UI
     command:
       - '--config.file=/etc/prometheus/prometheus.yml'
       - '--storage.tsdb.path=/prometheus'

@@ -1,438 +1,527 @@
-from ryu.base import app_manager
-from ryu.controller import ofp_event
-from ryu.controller.handler import CONFIG_DISPATCHER, MAIN_DISPATCHER, DEAD_DISPATCHER
-from ryu.controller.handler import set_ev_cls
-from ryu.lib.packet import packet
-from ryu.lib.packet import ethernet, arp, ipv4
-from ryu.ofproto import ofproto_v1_3
-from ryu.topology import event as topo_event
-from ryu.topology.api import get_all_switch, get_all_link
-from ryu.lib import mac
-from ryu.lib import hub
+import os
 import time
-from metrics_exporter import PrometheusMetricsExporter
+from ryu.controller import ofp_event
+from ryu.controller.handler import CONFIG_DISPATCHER, MAIN_DISPATCHER
+from ryu.controller.handler import set_ev_cls
+from ryu.ofproto import ofproto_v1_3
+from ryu.lib.packet import packet
+from ryu.lib.packet import packet_base
+from ryu.lib.packet import ethernet
+from ryu.lib.packet import ether_types
+from ryu.lib.packet import ipv4
+from ryu.lib.packet import arp
+from ryu.lib.packet import icmp
+from ryu.lib.packet import tcp
+from ryu.lib.packet import udp
+from ryu.lib.packet import in_proto
+from ryu.app.ofctl.api import get_datapath
+from ryu.lib import hub
+from base_switch import BaseSwitch
+from utils import Network
+from metrics_exporter import SDNMetricsExporter
+
+# Protocol Names
+ETHERNET = ethernet.ethernet.__name__
+# VLAN = vlan.vlan.__name__
+IPV4 = ipv4.ipv4.__name__
+ARP = arp.arp.__name__
+ICMP = icmp.icmp.__name__
+TCP = tcp.tcp.__name__
+UDP = udp.udp.__name__
+
+# Constants
+ENTRY_TABLE = 0
+LOCAL_TABLE = 0
+REMOTE_TABLE = 1
+
+MIN_PRIORITY = 0
+LOW_PRIORITY = 100
+MID_PRIORITY = 300
+
+# Set idle_time=0 to make flow entries permenant
+LONG_IDLE_TIME = 60
+MID_IDLE_TIME = 40
+IDLE_TIME = 30
 
 
-class SpineLeafController(app_manager.RyuApp):
+class SpineLeaf3(BaseSwitch):
+    """
+    A spine-leaf implementation with two tables using static network description.
+    """
+
     OFP_VERSIONS = [ofproto_v1_3.OFP_VERSION]
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.datapaths = {}
-        # Table to determine cross-leaf MAC
-        self.mac_to_dpid = {}
-        # host_mac -> (dpid, port)
-        self.host_locations = {}
-        # ip -> mac (learned via ARP)
-        self.ip_to_mac = {}
-        # switch_dpid -> set(uplink ports)
-        self.uplink_ports = {}
-        # switch_dpid -> set(host ports)
-        self.host_ports = {}
-        # switch_dpid -> neighbor switch ports: dpid -> port_no
-        self.switch_neighbors = {}
+
+        # Create central MAC table
+        self.mac_table = {}
         
+        # Track flow entries count per switch and table
+        self.flow_entries_count = {}
         
         # Initialize Prometheus metrics exporter
-        self.metrics = PrometheusMetricsExporter(self, port=9090, host='0.0.0.0')
-        try:
-            self.metrics.start()
-        except Exception as e:
-            self.logger.error("Failed to start metrics exporter: %s", e)
+        metrics_port = int(os.environ.get("METRICS_PORT", 8000))
+        self.metrics = SDNMetricsExporter(port=metrics_port)
+        self.metrics.start_server()
         
-        # periodic maintenance
-        self._monitor_thread = hub.spawn(self._monitor)
+        # Initialize topology metrics
+        self.metrics.update_switch_count('spine', len(net.spines))
+        self.metrics.update_switch_count('leaf', len(net.leaves))
+        
+        # Start periodic flow stats collection thread
+        self.flow_stats_interval = 10  # Request flow stats every 10 seconds
+        self.monitor_thread = hub.spawn(self._monitor_flow_stats)
+        
+        self.logger.info(f"Metrics exporter started on port {metrics_port}")
 
     @set_ev_cls(ofp_event.EventOFPSwitchFeatures, CONFIG_DISPATCHER)
-    def switch_features_handler(self, ev):
-        datapath = ev.msg.datapath
-        ofp = datapath.ofproto
+    def switch_features_handler(self, event):
+        """
+        This method is called after the controller configures a switch.
+        """
+
+        datapath = event.msg.datapath
+        ofproto = datapath.ofproto
         parser = datapath.ofproto_parser
 
-        # Install a table-miss flow to send unknown to controller
+        # Update switch status metrics
+        switch_type = 'leaf' if datapath.id in net.leaves else 'spine'
+        self.metrics.update_switch_status(datapath.id, switch_type, 1)
+
+        # Create a message to delete all exiting flows
+        msgs = [self.del_flow(datapath)]
+        self.metrics.increment_flow_mod(datapath.id, 'delete')
+
+        # Set Match to ANY
         match = parser.OFPMatch()
-        actions = [parser.OFPActionOutput(ofp.OFPP_CONTROLLER, ofp.OFPCML_NO_BUFFER)]
-        self.add_flow(datapath, priority=0, match=match, actions=actions)
 
-        # Enable ARP to controller
-        match_arp = parser.OFPMatch(eth_type=0x0806)
-        self.add_flow(datapath, priority=5, match=match_arp, actions=actions)
+        if datapath.id in net.leaves:  # For all leaf switches
+            # Add a table-miss entry for LOCAL_TABLE:
+            # Matched packets are sent to the next table
+            inst = [parser.OFPInstructionGotoTable(REMOTE_TABLE)]
+            msgs += [self.add_flow(datapath, LOCAL_TABLE, MIN_PRIORITY, match, inst)]
+            self.metrics.increment_flow_mod(datapath.id, 'add')
 
-        # Track datapath
-        self.datapaths[datapath.id] = datapath
-        self.logger.info("Switch connected: dpid=%s", datapath.id)
+            # Add a table-miss entry for REMOTE_TABLE:
+            # Matched packets are flooded and sent to the controller
+            actions = [
+                parser.OFPActionOutput(ofproto.OFPP_ALL),
+                parser.OFPActionOutput(
+                    ofproto.OFPP_CONTROLLER, ofproto.OFPCML_NO_BUFFER
+                ),
+            ]
+            inst = [parser.OFPInstructionActions(ofproto.OFPIT_APPLY_ACTIONS, actions)]
+            msgs += [self.add_flow(datapath, REMOTE_TABLE, MIN_PRIORITY, match, inst)]
+            self.metrics.increment_flow_mod(datapath.id, 'add')
 
-    def add_flow(self, datapath, priority, match, actions=None, buffer_id=None, table_id=0, inst=None):
-        start_time = time.time()
-        ofp = datapath.ofproto
-        parser = datapath.ofproto_parser
-        if inst is None:
-            if actions is None:
-                actions = []
-            inst = [parser.OFPInstructionActions(ofp.OFPIT_APPLY_ACTIONS, actions)]
-        if buffer_id:
-            mod = parser.OFPFlowMod(datapath=datapath, table_id=table_id, priority=priority,
-                                    buffer_id=buffer_id, match=match, instructions=inst)
-        else:
-            mod = parser.OFPFlowMod(datapath=datapath, table_id=table_id, priority=priority,
-                                    match=match, instructions=inst)
-        datapath.send_msg(mod)
+        else:  # For all spine switches
+            # Add a table-miss entry for ENTRY_TABLE to drop packets
+            msgs += [self.add_flow(datapath, ENTRY_TABLE, MIN_PRIORITY, match, [])]
+            self.metrics.increment_flow_mod(datapath.id, 'add')
+
+        # Send all messages to the switch
+        self.send_messages(datapath, msgs)
         
-        # Record flow installation timing
-        duration = time.time() - start_time
-        if hasattr(self, 'metrics'):
-            self.metrics.record_flow_install(datapath.id, duration)
+        # Request flow statistics to update metrics
+        self.request_flow_stats(datapath)
 
-    @set_ev_cls(ofp_event.EventOFPPortStatus, MAIN_DISPATCHER)
-    def port_status_handler(self, ev):
-        msg = ev.msg
-        reason = msg.reason
-        port = msg.desc
-        port_state = msg.desc.state
-        dpid = msg.datapath.id
-        if reason == msg.datapath.ofproto.OFPPR_ADD:
-            self.logger.info("Port added %s on dpid=%s", port.port_no, dpid)
-        elif reason == msg.datapath.ofproto.OFPPR_DELETE:
-            self.logger.info("Port deleted %s on dpid=%s", port.port_no, dpid)
-        else:
-            self.logger.info("Port modified %s on dpid=%s", port.port_no, dpid)
-        if port_state == 0: # PORT UP
-            self.metrics.port_status.labels(dpid=dpid, port_no=port.port_no, port_state='up').set(1)
-        else: # PORT DOWN/BLOCKED
-            self.metrics.port_status.labels(dpid=dpid, port_no=port.port_no, port_state=port_state).set(0)
-        # Recompute groups on this switch
-        self.recompute_groups_for_switch(dpid)
-
-    @set_ev_cls(topo_event.EventSwitchEnter)
-    def handler_switch_enter(self, ev):
-        self.logger.info("Switch discovered: %s", ev.switch.dp.id)
-        self.rebuild_topology()
-
-    @set_ev_cls(topo_event.EventLinkAdd)
-    def handler_link_add(self, ev):
-        self.logger.info("Link added: %s -> %s", ev.link.src, ev.link.dst)
-        self.rebuild_topology()
-
-    @set_ev_cls(topo_event.EventLinkDelete)
-    def handler_link_del(self, ev):
-        self.logger.info("Link deleted: %s -> %s", ev.link.src, ev.link.dst)
-        self.rebuild_topology()
-
-    def rebuild_topology(self):
-        # Build neighbor maps and infer uplinks vs host ports
-        start_time = time.time()
-        switches = get_all_switch(self)
-        links = get_all_link(self)
-
-        neighbor_ports = {sw.dp.id: {} for sw in switches}
-        uplinks = {sw.dp.id: set() for sw in switches}
-
-        for link in links:
-            src_dpid = link.src.dpid
-            dst_dpid = link.dst.dpid
-            neighbor_ports[src_dpid][dst_dpid] = link.src.port_no
-            neighbor_ports[dst_dpid][src_dpid] = link.dst.port_no
-            uplinks[src_dpid].add(link.src.port_no)
-            uplinks[dst_dpid].add(link.dst.port_no)
-
-        self.switch_neighbors = neighbor_ports
-        self.uplink_ports = uplinks
-
-        # Host ports are those not in uplinks and not local OFPP_LOCAL
-        for sw in switches:
-            dp = sw.dp
-            ofp = dp.ofproto
-            host_ports = set()
-            for p in sw.ports:
-                if p.port_no == ofp.OFPP_LOCAL:
-                    continue
-                if p.port_no not in self.uplink_ports.get(dp.id, set()):
-                    host_ports.add(p.port_no)
-            self.host_ports[dp.id] = host_ports
-
-        # Create/update ECMP groups on leaves (switches that have host_ports)
-        for dpid, ports in self.host_ports.items():
-            if ports:
-                self.install_ecmp_group_on_leaf(dpid)
-
-        self.logger.info("Topology rebuilt. Neighbors: %s, uplinks: %s, host_ports: %s",
-                         self.switch_neighbors, self.uplink_ports, self.host_ports)
+    @set_ev_cls(ofp_event.EventOFPFlowStatsReply, MAIN_DISPATCHER)
+    def flow_stats_reply_handler(self, event):
+        """Handle flow statistics reply from switches"""
+        datapath = event.msg.datapath
+        dpid = datapath.id
         
-        # Record topology rebuild duration
-        duration = time.time() - start_time
-        if hasattr(self, 'metrics'):
-            self.metrics.record_topology_rebuild(duration)
-
-    def install_ecmp_group_on_leaf(self, dpid):
-        dp = self.datapaths.get(dpid)
-        if dp is None:
-            return
-        parser = dp.ofproto_parser
-        ofp = dp.ofproto
-
-        uplinks = sorted(self.uplink_ports.get(dpid, []))
-        if not uplinks:
-            return
-
-        group_id = 100  # fixed group id for leaf uplink ECMP
-
-        buckets = []
-        for port in uplinks:
-            actions = [parser.OFPActionOutput(port)]
-            buckets.append(parser.OFPBucket(actions=actions))
-
-        req = parser.OFPGroupMod(datapath=dp,
-                                 command=ofp.OFPGC_DELETE,
-                                 type_=ofp.OFPGT_SELECT,
-                                 group_id=group_id)
-        dp.send_msg(req)
-
-        req = parser.OFPGroupMod(datapath=dp,
-                                 command=ofp.OFPGC_ADD,
-                                 type_=ofp.OFPGT_SELECT,
-                                 group_id=group_id,
-                                 buckets=buckets)
-        dp.send_msg(req)
-        self.logger.info("Installed ECMP group on leaf dpid=%s uplinks=%s", dpid, uplinks)
-
-    def recompute_groups_for_switch(self, dpid):
-        # Re-evaluate links and update ECMP
-        self.rebuild_topology()
-        if self.host_ports.get(dpid):
-            self.install_ecmp_group_on_leaf(dpid)
+        # Count flows per table
+        table_flows = {}
+        for stat in event.msg.body:
+            table_id = stat.table_id
+            if table_id not in table_flows:
+                table_flows[table_id] = 0
+            table_flows[table_id] += 1
+        
+        # Update metrics for each table
+        for table_id, count in table_flows.items():
+            self.metrics.update_flow_entries(dpid, table_id, count)
+            # Update local tracking
+            self.flow_entries_count[(dpid, table_id)] = count
+        
+        # Also update tables with 0 entries
+        if dpid in net.leaves:
+            for table_id in [LOCAL_TABLE, REMOTE_TABLE]:
+                if table_id not in table_flows:
+                    self.metrics.update_flow_entries(dpid, table_id, 0)
+                    self.flow_entries_count[(dpid, table_id)] = 0
+        else:  # spine switch
+            if ENTRY_TABLE not in table_flows:
+                self.metrics.update_flow_entries(dpid, ENTRY_TABLE, 0)
+                self.flow_entries_count[(dpid, ENTRY_TABLE)] = 0
 
     @set_ev_cls(ofp_event.EventOFPPacketIn, MAIN_DISPATCHER)
-    def packet_in_handler(self, ev):
-        msg = ev.msg
-        datapath = msg.datapath
-        dpid = datapath.id
-        parser = datapath.ofproto_parser
-        ofp = datapath.ofproto
-        in_port = msg.match['in_port']
+    def packet_in_handler(self, event):
+        """Handle packet_in message.
 
-        pkt = packet.Packet(msg.data)
-        eth = pkt.get_protocol(ethernet.ethernet)
-        if eth is None:
-            return
+        This method is called when a PacketIn message is received. The message
+        is sent by the switch to request processing of the packet by the
+        controller such as when a table miss occurs.
+        """
+        
+        # Start timing for performance metrics
+        start_time = time.time()
+
+        # Get the originating switch from the event
+        datapath = event.msg.datapath
+        ofproto = datapath.ofproto
+        parser = datapath.ofproto_parser
+
+        # Get the packet's ingress port from the event
+        in_port = event.msg.match["in_port"]
+
+        # Get the packet from the event
+        pkt = packet.Packet(event.msg.data)
+
+        # Extract head information from the packet and return as dictionary
+        header_list = dict(
+            (p.protocol_name, p)
+            for p in pkt.protocols
+            if isinstance(p, packet_base.PacketBase)
+        )
+
+        # Get the packet's source and destination MAC addresses
+        eth = header_list[ETHERNET]
         dst = eth.dst
         src = eth.src
+        
+        # Record packet size for bandwidth metrics
+        packet_size = len(event.msg.data)
+        self.metrics.add_bytes_transmitted(datapath.id, 'in', packet_size)
 
-        # Learn source location
-        self.mac_to_dpid[src] = dpid
+        # Update the MAC table and record metrics
+        self.update_mac_table(src, in_port, datapath.id)
 
-        if dst in self.mac_to_dpid:
-            src_dpid = self.mac_to_dpid[src]
-            dst_dpid = self.mac_to_dpid[dst]
-            if src_dpid != dst_dpid:
-                # Cross-leaf traffic
-                self.metrics.cross_leaf_traffic_bytes.labels(src_dpid=src_dpid, dst_dpid=dst_dpid).inc(len(msg.data))
-                return
+        # Remote switches are all leaf switches except the originating switch
+        remote_switches = list(set(net.leaves) - set([datapath.id]))
+        
+        # Increment PacketIn counter
+        self.metrics.increment_packet_in(datapath.id, 'table_miss')
 
-        # Ignore LLDP
-        if eth.ethertype == 0x88cc:
-            return
+        if ARP in header_list:
+            # Record ARP packet
+            arp_pkt = header_list[ARP]
+            arp_type = 'request' if arp_pkt.opcode == arp.ARP_REQUEST else 'reply'
+            self.metrics.increment_arp_packets(datapath.id, arp_type)
+            self.metrics.increment_protocol_packet('ARP', datapath.id)
+            
+            # Send the packet to all remote switches to be flooded
+            for leaf in remote_switches:
+                # Get the datapath object
+                dpath = get_datapath(self, leaf)
+                msgs = self.forward_packet(
+                    dpath, event.msg.data, ofproto.OFPP_CONTROLLER, ofproto.OFPP_ALL
+                )
+                self.send_messages(dpath, msgs)
+                self.metrics.increment_packets_flooded(dpath.id)
 
-        # Track packet-in event
-        reason_str = 'table_miss' if msg.reason == ofp.OFPR_NO_MATCH else 'action'
-        if hasattr(self, 'metrics'):
-            self.metrics.handle_packet_in(dpid, reason_str)
+        elif IPV4 in header_list:
+            # Record IPv4 packet
+            self.metrics.increment_protocol_packet('IPv4', datapath.id)
+            # In the originating switch:
 
-        # Learn host location on access ports
-        if in_port in self.host_ports.get(dpid, set()):
-            self.host_locations[src] = (dpid, in_port)
+            # Add a flow entry in LOCAL_TABLE to forward packets to the given
+            # output port if their destination MAC address matches this source
+            match = parser.OFPMatch(eth_dst=src)
+            actions = [parser.OFPActionOutput(in_port)]
+            inst = [parser.OFPInstructionActions(ofproto.OFPIT_APPLY_ACTIONS, actions)]
+            msgs = [
+                self.add_flow(
+                    datapath,
+                    LOCAL_TABLE,
+                    LOW_PRIORITY,
+                    match,
+                    inst,
+                    i_time=LONG_IDLE_TIME,
+                )
+            ]
+            self.send_messages(datapath, msgs)
+            self.metrics.increment_flow_mod(datapath.id, 'add')
 
-        # ARP handling
-        arp_pkt = pkt.get_protocol(arp.arp)
-        if arp_pkt:
-            # Track ARP packet
-            if hasattr(self, 'metrics'):
-                self.metrics.handle_arp_packet(dpid, arp_pkt.opcode)
-            self.handle_arp(datapath, in_port, eth, arp_pkt, msg)
-            return
+            # Get the packet higher layer information if available
+            packet_info = self.get_ipv4_packet_info(pkt, header_list)
+            self.logger.info(
+                f"Packet Info: {packet_info[0]}, {packet_info[1]} {packet_info[2]}, {packet_info[3]}, {packet_info[4]}"
+            )
 
-        # IP handling (ECMP across fabric)
-        ip4 = pkt.get_protocol(ipv4.ipv4)
-        if ip4:
-            self.forward_unicast(datapath, in_port, src, dst, msg)
-            return
+            packet_type = packet_info[0]
+            protocol_name, src_ip, dst_ip, src_port, dst_port = packet_info
+            
+            # Record protocol-specific metrics
+            self.metrics.increment_protocol_packet(protocol_name, datapath.id)
+            self.metrics.record_traffic_flow(src_ip, dst_ip, protocol_name)
+            
+            # Record TCP/UDP connection metrics
+            if protocol_name == TCP:
+                self.metrics.increment_tcp_connection(src_ip, dst_ip, dst_port)
+            elif protocol_name == UDP:
+                self.metrics.increment_udp_flow(src_ip, dst_ip, dst_port)
+            
+            dst_host = self.mac_table.get(dst)
 
-        # Default behavior: treat as L2 unicast
-        self.forward_unicast(datapath, in_port, src, dst, msg)
+            if dst_host:
+                # If the destination is in the MAC Table
 
-        # Try forwarding packet to another switch port
-        try:
-            actions = [parser.OFPActionOutput(ofp.OFPP_FLOOD)]
-            out = parser.OFPPacketOut(datapath=datapath, buffer_id=ofproto_v1_3.OFP_NO_BUFFER, in_port=in_port, actions=actions, data=msg.data)
-            datapath.send_msg(out)
-        except Exception:
-            self.metrics.packet_out_errors.labels(dpid=dpid).inc()
+                # If it is connected to a remote switch
+                if dst_host["dpid"] in remote_switches:
+                    # Select a spine switch based on packet info
+                    # The selected spine must be the same in each direction
+                    spine_id = net.spines[
+                        self.select_spine_from_packet_info(packet_info, len(net.spines))
+                    ]
+                    
+                    # Record spine selection
+                    self.metrics.increment_spine_selection(spine_id)
 
-    def handle_arp(self, datapath, in_port, eth, arp_pkt, msg):
-        parser = datapath.ofproto_parser
-        ofp = datapath.ofproto
-        dpid = datapath.id
+                    # In the originating switch,
+                    # add an entry to the REMOTE_TABLE to forward packets
+                    # from the source to the destination towards the spine switch
 
-        # Learn IP -> MAC mapping
-        if arp_pkt.src_ip and eth.src:
-            self.ip_to_mac[arp_pkt.src_ip] = eth.src
-            # Learn source location if on a host port
-            if in_port in self.host_ports.get(dpid, set()):
-                self.host_locations[eth.src] = (dpid, in_port)
+                    # in_port = net.links[datapath.id, spine_id]["port"]
+                    upstream_port = net.links[datapath.id, spine_id]["port"]
 
-        # If request and we know the answer, reply
-        if arp_pkt.opcode == arp.ARP_REQUEST:
-            target_mac = self.ip_to_mac.get(arp_pkt.dst_ip)
-            if target_mac:
-                self.send_arp_reply(datapath, in_port, src_mac=target_mac,
-                                    dst_mac=eth.src, src_ip=arp_pkt.dst_ip, dst_ip=arp_pkt.src_ip)
-                return
+                    msgs = self.create_match_entry_at_leaf(
+                        datapath,
+                        REMOTE_TABLE,
+                        MID_PRIORITY,
+                        IDLE_TIME,
+                        packet_info,
+                        upstream_port,
+                    )
+                    self.send_messages(datapath, msgs)
+                    self.metrics.increment_flow_mod(datapath.id, 'add')
 
-        actions = []
-        host_ports = self.host_ports.get(dpid, set())
+                    # In the spine switch,
+                    # add two entries to forward packets between the source and
+                    # destination in both directions
 
-        if host_ports:
-            # Leaf: flood to host ports (except in_port). If came from host, also send up to spines.
-            for p in host_ports:
-                if p != in_port:
-                    actions.append(parser.OFPActionOutput(p))
-            if in_port in host_ports:
-                # also send into fabric for discovery via ECMP
-                actions.append(parser.OFPActionGroup(100))
-        else:
-            # Spine: forward ARP down to all neighbors except incoming port
-            neighbor_map = self.switch_neighbors.get(dpid, {})
-            for _, port_no in neighbor_map.items():
-                if port_no != in_port:
-                    actions.append(parser.OFPActionOutput(port_no))
+                    spine_datapath = get_datapath(self, spine_id)
+                    dst_datapath = get_datapath(self, dst_host["dpid"])
+                    spine_ingress_port = net.links[spine_id, datapath.id]["port"]
+                    spine_egress_port = net.links[spine_id, dst_datapath.id]["port"]
 
-        if actions:
-            out = parser.OFPPacketOut(datapath=datapath, buffer_id=msg.buffer_id,
-                                      in_port=in_port, actions=actions,
-                                      data=None if msg.buffer_id != ofp.OFP_NO_BUFFER else msg.data)
-            datapath.send_msg(out)
+                    msgs = self.create_match_entry_at_spine(
+                        spine_datapath,
+                        ENTRY_TABLE,
+                        MID_PRIORITY,
+                        packet_info,
+                        spine_ingress_port,
+                        spine_egress_port,
+                        MID_IDLE_TIME,
+                    )
+                    self.send_messages(spine_datapath, msgs)
+                    self.metrics.increment_flow_mod(spine_id, 'add')
 
-    def send_arp_reply(self, datapath, out_port, src_mac, dst_mac, src_ip, dst_ip):
-        parser = datapath.ofproto_parser
-        ofp = datapath.ofproto
+                    # In the remote switch,
+                    # Send the received packet to the destination switch
+                    # to forward it.
+                    remote_port = dst_host["port"]
+                    msgs = self.forward_packet(
+                        dst_datapath,
+                        event.msg.data,
+                        ofproto.OFPP_CONTROLLER,
+                        remote_port,
+                    )
+                    self.send_messages(dst_datapath, msgs)
+                    
+                    # Record remote forwarding metrics
+                    self.metrics.record_remote_forwarding(datapath.id, dst_host["dpid"], spine_id)
+                    self.metrics.increment_packets_forwarded(dst_datapath.id, remote_port)
 
-        e = ethernet.ethernet(dst=dst_mac, src=src_mac, ethertype=0x0806)
-        a = arp.arp_ip(arp.ARP_REPLY, src_mac, src_ip, dst_mac, dst_ip)
-        p = packet.Packet()
-        p.add_protocol(e)
-        p.add_protocol(a)
-        p.serialize()
-
-        actions = [parser.OFPActionOutput(out_port)]
-        out = parser.OFPPacketOut(datapath=datapath,
-                                  buffer_id=ofp.OFP_NO_BUFFER,
-                                  in_port=ofp.OFPP_CONTROLLER,
-                                  actions=actions,
-                                  data=p.data)
-        datapath.send_msg(out)
-
-    def forward_unicast(self, datapath, in_port, src_mac, dst_mac, msg):
-        parser = datapath.ofproto_parser
-        ofp = datapath.ofproto
-        dpid = datapath.id
-
-        # If destination is broadcast/multicast, limit flooding to host ports
-        if dst_mac == mac.BROADCAST or dst_mac.startswith('01:'):
-            out_ports = [p for p in self.host_ports.get(dpid, set()) if p != in_port]
-            actions = [parser.OFPActionOutput(p) for p in out_ports]
-            out = parser.OFPPacketOut(datapath=datapath, buffer_id=msg.buffer_id,
-                                      in_port=in_port, actions=actions,
-                                      data=None if msg.buffer_id != ofp.OFP_NO_BUFFER else msg.data)
-            datapath.send_msg(out)
-            return
-
-        # If we know destination host location
-        dst_loc = self.host_locations.get(dst_mac)
-        if dst_loc:
-            dst_dpid, dst_port = dst_loc
-            if dst_dpid == dpid:
-                # Same switch: install flow to local port
-                match = parser.OFPMatch(eth_dst=dst_mac)
-                actions = [parser.OFPActionOutput(dst_port)]
-                self.add_flow(datapath, priority=20, match=match, actions=actions)
-                self.packetout(datapath, msg, actions)
-                return
             else:
-                # Different leaf: on source leaf, send to ECMP group; on spines, send down to leaf
-                if in_port in self.host_ports.get(dpid, set()):
-                    # source leaf
-                    group_id = 100
-                    actions = [parser.OFPActionGroup(group_id)]
-                    match = parser.OFPMatch(eth_dst=dst_mac)
-                    self.add_flow(datapath, priority=15, match=match, actions=actions)
-                    self.packetout(datapath, msg, actions)
-                    return
-                else:
-                    # transit/spine: forward to port that leads to dst leaf
-                    out_port = self.get_port_towards(dpid, dst_dpid)
-                    if out_port:
-                        actions = [parser.OFPActionOutput(out_port)]
-                        match = parser.OFPMatch(eth_dst=dst_mac)
-                        self.add_flow(datapath, priority=15, match=match, actions=actions)
-                        self.packetout(datapath, msg, actions)
-                        return
+                # If the destination is not in the MAC Table
+                # Send the packet to all remote switches to be flooded
+                for leaf in remote_switches:
+                    # Get the datapath object
+                    dpath = get_datapath(self, leaf)
+                    msgs = self.forward_packet(
+                        dpath, event.msg.data, ofproto.OFPP_CONTROLLER, ofproto.OFPP_ALL
+                    )
 
-        # Unknown destination: limit flood to host ports; on leaves also send to ECMP for discovery
-        out_actions = []
-        for p in self.host_ports.get(dpid, set()):
-            if p != in_port:
-                out_actions.append(parser.OFPActionOutput(p))
-        if in_port in self.host_ports.get(dpid, set()):
-            # also send up into fabric for discovery
-            out_actions.append(parser.OFPActionGroup(100))
-        if out_actions:
-            self.packetout(datapath, msg, out_actions)
+                    self.send_messages(dpath, msgs)
+                    self.metrics.increment_packets_flooded(dpath.id)
+        
+        # Record packet processing time
+        processing_time = time.time() - start_time
+        self.metrics.packet_in_processing_time.labels(dpid=datapath.id).observe(processing_time)
 
-    def get_port_towards(self, src_dpid, dst_dpid):
-        # One hop towards destination leaf: if src is spine, choose neighbor port towards dst leaf.
-        neighbors = self.switch_neighbors.get(src_dpid, {})
-        if dst_dpid in neighbors:
-            return neighbors[dst_dpid]
-        # If src is a leaf and dst is different leaf, choose any uplink (first)
-        upl = sorted(self.uplink_ports.get(src_dpid, []))
-        return upl[0] if upl else None
+    def update_mac_table(self, src, port, dpid):
+        """
+        Set/Update the node information in the MAC table
+        the MAC table includes the input port and input switch
+        """
 
-    def packetout(self, datapath, msg, actions):
+        src_host = self.mac_table.get(src, {})
+        
+        # Check if this is a new MAC address
+        if not src_host:
+            self.metrics.record_mac_learned(dpid)
+        
+        src_host["port"] = port
+        src_host["dpid"] = dpid
+        self.mac_table[src] = src_host
+        
+        # Update MAC table size metric
+        self.metrics.update_mac_table_size(len(self.mac_table))
+        
+        return src_host
+
+    def create_match_entry_at_leaf(
+        self, datapath, table, priority, idle_time, packet_info, out_port
+    ):
+        ofproto = datapath.ofproto
         parser = datapath.ofproto_parser
-        ofp = datapath.ofproto
-        out = parser.OFPPacketOut(datapath=datapath, buffer_id=msg.buffer_id,
-                                  in_port=msg.match['in_port'], actions=actions,
-                                  data=None if msg.buffer_id != ofp.OFP_NO_BUFFER else msg.data)
-        datapath.send_msg(out)
 
-    @set_ev_cls(ofp_event.EventOFPPortStatsReply, MAIN_DISPATCHER)
-    def port_stats_reply_handler(self, ev):
-        """Handle port statistics reply"""
-        if hasattr(self, 'metrics'):
-            self.metrics.handle_port_stats_reply(ev)
-    
-    @set_ev_cls(ofp_event.EventOFPFlowStatsReply, MAIN_DISPATCHER)
-    def flow_stats_reply_handler(self, ev):
-        """Handle flow statistics reply"""
-        if hasattr(self, 'metrics'):
-            self.metrics.handle_flow_stats_reply(ev)
-    
-    @set_ev_cls(ofp_event.EventOFPGroupStatsReply, MAIN_DISPATCHER)
-    def group_stats_reply_handler(self, ev):
-        """Handle group statistics reply"""
-        if hasattr(self, 'metrics'):
-            self.metrics.handle_group_stats_reply(ev)
+        protocol, src_ip, dst_ip, src_port, dst_port = packet_info
 
-    @set_ev_cls(ofp_event.EventOFPErrorMsg, MAIN_DISPATCHER)
-    def error_msg_handler(self, ev):
-        """Handle error messages"""
-        if hasattr(self, 'metrics'):
-            self.metrics.handle_error_msg(ev)
+        if protocol == TCP:
+            match = parser.OFPMatch(
+                eth_type=ether_types.ETH_TYPE_IP,
+                ipv4_src=src_ip,
+                ipv4_dst=dst_ip,
+                ip_proto=in_proto.IPPROTO_TCP,
+                tcp_src=src_port,
+                tcp_dst=dst_port,
+            )
+        elif protocol == UDP:
+            match = parser.OFPMatch(
+                eth_type=ether_types.ETH_TYPE_IP,
+                ipv4_src=src_ip,
+                ipv4_dst=dst_ip,
+                ip_proto=in_proto.IPPROTO_UDP,
+                udp_src=src_port,
+                udp_dst=dst_port,
+            )
+        else:
+            match = parser.OFPMatch(
+                eth_type=ether_types.ETH_TYPE_IP,
+                ipv4_src=src_ip,
+                ipv4_dst=dst_ip,
+            )
+        actions = [parser.OFPActionOutput(out_port)]
+        inst = [parser.OFPInstructionActions(ofproto.OFPIT_APPLY_ACTIONS, actions)]
+        msg = [
+            self.add_flow(
+                datapath,
+                table,
+                priority,
+                match,
+                inst,
+                i_time=idle_time,
+            )
+        ]
 
-    def _monitor(self):
+        return msg
+
+    def create_match_entry_at_spine(
+        self,
+        datapath,
+        table,
+        priority,
+        packet_info,
+        in_port,
+        out_port,
+        i_time,
+    ):
+        """
+        Returns MOD messages to add two flow entries allowing packets between
+        two nodes
+        """
+
+        ofproto = datapath.ofproto
+        parser = datapath.ofproto_parser
+
+        protocol, src_ip, dst_ip, src_port, dst_port = packet_info
+
+        if protocol == TCP:
+            match = parser.OFPMatch(
+                in_port=in_port,
+                eth_type=ether_types.ETH_TYPE_IP,
+                ipv4_src=src_ip,
+                ipv4_dst=dst_ip,
+                ip_proto=in_proto.IPPROTO_TCP,
+                tcp_src=src_port,
+                tcp_dst=dst_port,
+            )
+        elif protocol == UDP:
+            match = parser.OFPMatch(
+                in_port=in_port,
+                eth_type=ether_types.ETH_TYPE_IP,
+                ipv4_src=src_ip,
+                ipv4_dst=dst_ip,
+                ip_proto=in_proto.IPPROTO_UDP,
+                udp_src=src_port,
+                udp_dst=dst_port,
+            )
+        else:
+            match = parser.OFPMatch(
+                in_port=in_port,
+                eth_type=ether_types.ETH_TYPE_IP,
+                ipv4_src=src_ip,
+                ipv4_dst=dst_ip,
+            )
+        actions = [parser.OFPActionOutput(out_port)]
+        inst = [parser.OFPInstructionActions(ofproto.OFPIT_APPLY_ACTIONS, actions)]
+        msgs = [self.add_flow(datapath, table, priority, match, inst, i_time=i_time)]
+
+        return msgs
+
+    def get_ipv4_packet_info(self, pkt, header_list):
+        """Get IPv4 packet header information"""
+
+        ip_pkt = header_list[IPV4]
+        src_ip = ip_pkt.src
+        dst_ip = ip_pkt.dst
+
+        if TCP in header_list:
+            tcp_pkt = header_list[TCP]
+            return TCP, src_ip, dst_ip, tcp_pkt.src_port, tcp_pkt.dst_port
+
+        if UDP in header_list:
+            udp_pkt = header_list[UDP]
+            return UDP, src_ip, dst_ip, udp_pkt.src_port, udp_pkt.dst_port
+
+        return ICMP, src_ip, dst_ip, 0, 0
+
+    def select_spine_from_packet_info(self, packet_info, num_spines):
+        """Select spine switch based source and destination IP addresses
+        and TCP/UDP port numbers"""
+
+        _, src_ip, dst_ip, src_port, dst_port = packet_info
+        srcip_as_num = sum(map(int, src_ip.split(".")))
+        dstip_as_num = sum(map(int, dst_ip.split(".")))
+
+        return (srcip_as_num + dstip_as_num + src_port + dst_port) % num_spines
+
+    def request_flow_stats(self, datapath):
+        """Request flow statistics from a switch"""
+        ofproto = datapath.ofproto
+        parser = datapath.ofproto_parser
+        
+        # Request all flow stats from all tables
+        req = parser.OFPFlowStatsRequest(datapath)
+        datapath.send_msg(req)
+
+    def _monitor_flow_stats(self):
+        """Background thread to periodically request flow statistics from all switches"""
         while True:
-            # Periodically refresh topology and ECMP groups to react to link changes
-            try:
-                self.rebuild_topology()
-            except Exception as e:
-                self.logger.exception("Error in monitor: %s", e)
-            hub.sleep(5)
+            # Wait for the specified interval
+            hub.sleep(self.flow_stats_interval)
+            
+            # Request flow stats from all switches
+            all_switches = net.spines + net.leaves
+            for dpid in all_switches:
+                datapath = get_datapath(self, dpid)
+                if datapath is not None:
+                    self.request_flow_stats(datapath)
+
+
+config_file = os.environ.get("NETWORK_CONFIG_FILE", "network_config.yaml")
+net = Network(config_file)

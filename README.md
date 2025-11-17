@@ -1,316 +1,197 @@
-# 🚀 SDN Lab - Quick Start Guide
+# SDN Monitoring System
 
-Hệ thống SDN Lab với Spine-Leaf topology, Ryu controller, và monitoring stack (Prometheus + Grafana).
+A comprehensive Software-Defined Networking (SDN) laboratory environment featuring automated traffic generation, real-time monitoring, and advanced visualization capabilities. Built with Mininet, Ryu SDN controller, Prometheus metrics collection, and Grafana dashboards.
 
-## 📦 Yêu cầu hệ thống
+## ✨ Features
 
-- Docker & Docker Compose
-- RAM: 4GB+ khuyến nghị
-- CPU: 2 cores+
-- Disk: 5GB free space
+- **🏗️ Complete SDN Lab Environment**: Pre-configured Mininet topology with spine-leaf architecture
+- **🎛️ Ryu SDN Controller**: Custom controller with advanced routing and monitoring capabilities
+- **📊 Real-time Monitoring**: Prometheus metrics collection from SDN switches
+- **📈 Advanced Visualization**: Grafana dashboards for network performance analysis
+- **🚀 Automated Traffic Generation**: Random traffic patterns with multiple protocols (TCP, UDP, ICMP)
+- **🔄 Flow Management**: Web-based interface for flow rule management
+- **🐳 Containerized**: Fully dockerized environment for easy deployment
+- **📈 Performance Metrics**: Comprehensive network statistics and analytics
 
-## ⚡ Khởi động nhanh (3 bước)
+### Network Topology
 
-### 1. Clone và khởi động
+The lab implements a spine-leaf data center topology with:
+- **2 Spine Switches**: Core layer for inter-rack connectivity
+- **4 Leaf Switches**: Edge layer connecting to servers
+- **6 Hosts**: Simulating end devices (h1-h6)
+
+![Network Topology](./mininet/topo.png)
+
+## 📋 Prerequisites
+
+- **Docker**: Version 20.10 or later
+- **Docker Compose**: Version 2.0 or later
+- **Git**: For cloning the repository
+- **Web Browser**: For accessing web interfaces
+- **Minimum System Requirements**:
+  - CPU: 2 cores
+  - RAM: 4GB
+  - Disk: 2GB free space
+
+### Installing Prerequisites
+
+**Ubuntu/Debian:**
+```bash
+# Install Docker
+curl -fsSL https://get.docker.com -o get-docker.sh
+sudo sh get-docker.sh
+
+# Install Docker Compose
+sudo curl -L "https://github.com/docker/compose/releases/download/v2.24.0/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
+sudo chmod +x /usr/local/bin/docker-compose
+```
+
+**Windows:**
+```powershell
+# Install Docker Desktop from https://www.docker.com/products/docker-desktop
+# Docker Compose is included with Docker Desktop
+```
+
+## 🚀 Quick Start
+
+1. **Clone the repository:**
+   ```bash
+   git clone https://github.com/kusanali3110/sdn_project
+   cd sdn_project
+   ```
+
+2. **Start the environment:**
+   ```bash
+   docker-compose up -d
+   ```
+
+3. **Verify containers are running:**
+   ```bash
+   docker ps
+   ```
+
+4. **Access the services:**
+   - **Grafana**: http://localhost:3000 (admin/admin)
+   - **Flow Manager**: http://localhost:8080
+   - **Prometheus**: http://localhost:9091
+
+## 📖 Detailed Setup
+
+### Step 1: Environment Setup
 
 ```bash
-# Di chuyển vào thư mục project
-cd sdn_lab
+# Clone repository
+git clone https://github.com/kusanali3110/sdn_project
+cd sdn_project
 
-# Khởi động toàn bộ hệ thống
+# Start all services
 docker-compose up -d
+
+# Verify all containers are running
+docker ps -a
 ```
 
-### 2. Kiểm tra services
+### Step 2: Network Topology Setup
 
 ```bash
-# Kiểm tra containers đang chạy
-docker ps
+# Access Mininet container
+docker exec -it mininet bash
 
-# Bạn sẽ thấy 4 containers:
-# - ryu_controller (port 6653, 8080, 9090)
-# - mininet (auto-start với topology)
-# - prometheus (port 9091)
-# - grafana (port 3000)
+# Start Open vSwitch service
+service openvswitch-switch start
+
+# Create network topology with Ryu controller
+mn --custom /app/spine_leaf.py --topo spineleaf --controller remote,ip=ryu,port=6653 --switch ovsk,protocols=OpenFlow13
 ```
 
-### 3. Truy cập Dashboards
+### Step 3: Traffic Generation
 
-- **Flow manager:** http://localhost:8080/home/index.html
-
-- **Metrics:** http://localhost:9090/metrics 
-
-- **Grafana:** http://localhost:3000
-  - Username: `admin`
-  - Password: `admin` (đổi khi đăng nhập lần đầu)
-  - Dashboards → SDN Monitoring folder
-
-- **Prometheus:** http://localhost:9091
-  - Xem metrics và queries
-
-## 🎮 Sử dụng Mininet
-
-### Mode mặc định: Interactive
-
-Container Mininet tự động khởi động với topology và vào CLI mode:
+Once inside the Mininet CLI (`mininet>` prompt):
 
 ```bash
-# Attach vào Mininet CLI
-docker attach mininet
-
-# Bạn sẽ thấy:
-# mininet>
+# Start automated traffic generation
+mininet> py exec(open('/app/traffic_generator.py').read())
 ```
 
-### Chạy traffic simulation
+The traffic generator will:
+- Generate random TCP/UDP/Ping traffic
+- Use random source/destination pairs
+- Apply random bandwidth and timing parameters
+- Run continuously until stopped (Ctrl+C)
+
+## 🎯 Usage
+
+### Basic Network Operations
 
 ```bash
-# Trong Mininet CLI:
-mininet> py show_help()              # Xem tất cả commands
-mininet> py mixed_traffic(60)        # Mixed traffic 60 giây
-mininet> py demo()                   # Chạy demo
-mininet> pingall                     # Test connectivity
+# Access Mininet CLI
+docker exec -it mininet bash
+mn --custom /app/spine_leaf.py --topo spineleaf --controller remote,ip=ryu,port=6653 --switch ovsk,protocols=OpenFlow13
+
+# In Mininet CLI
+mininet> pingall                    # Test connectivity
+mininet> iperf h1 h2                # Test bandwidth
+mininet> net                        # Show network topology
+mininet> dump                       # Show host processes
 ```
 
-### Thoát CLI mà không dừng container
-
-Nhấn: `Ctrl+P` sau đó `Ctrl+Q`
-
-## 🔄 Các chế độ tự động khác
-
-Edit file `docker-compose.yaml` để thay đổi mode:
-
-### Continuous Traffic (Tự động liên tục)
-
-```yaml
-# Trong docker-compose.yaml, section mininet:
-command: /app/start_wrapper.sh --mode continuous
-```
+### Traffic Simulation
 
 ```bash
-# Restart container
-docker-compose restart mininet
+# Start traffic generation
+mininet> py exec(open('/app/traffic_generator.py').read())
 
-# Traffic sẽ tự động chạy liên tục
-# Mở Grafana để xem real-time metrics
+# Stop with Ctrl+C
 ```
 
-### Demo Mode
+### Flow Management
 
-```yaml
-command: /app/start_wrapper.sh --mode demo
-```
+Access the Flow Manager web interface at http://localhost:8080/home/index.html to:
+- View current flow rules
+- Add/modify flow entries
+- Monitor switch statistics
+- Manage SDN policies
 
-Chạy demo các loại traffic rồi vào CLI.
+## 🌐 Services & Endpoints
 
-### Mixed Traffic Mode
+| Service | URL | Description | Credentials |
+|---------|-----|-------------|-------------|
+| **Grafana** | http://localhost:3000 | Visualization & Dashboards | admin/admin |
+| **Flow Manager** | http://localhost:8080/home/index.html | SDN Flow Management | - |
+| **Prometheus** | http://localhost:9091 | Metrics Collection | - |
+| **Metrics** | http://localhost:9090/metrics | Raw Metrics Endpoint | - |
 
-```yaml
-command: /app/start_wrapper.sh --mode mixed
-```
+### Default Ports Mapping
 
-Chạy mixed traffic 120s rồi vào CLI.
+- **Ryu Controller**: Container port 6653 → Host port 6653
+- **Flow Manager**: Container port 8080 → Host port 8080
+- **Prometheus**: Container port 9090 → Host port 9091
+- **Grafana**: Container port 3000 → Host port 3000
+- **Metrics Exporter**: Container port 8000 → Host port 9090
 
-## 📊 Xem Metrics trên Grafana
+## 📊 Monitoring & Visualization
 
-1. Mở browser: http://localhost:3000
-2. Login (admin/admin)
-3. Vào: Dashboards → SDN Monitoring
-4. Chọn dashboard:
-   - **SDN Executive Summary** - Overview
-   - **SDN Network Overview** - Topology details
-   - **SDN Traffic & ECMP** - Traffic analysis
-   - **SDN Controller Performance** - Controller metrics
+### Grafana Dashboards
 
-## 🛠️ Commands hữu ích
+The system includes three pre-configured dashboards:
 
-### Xem logs
+1. **Network Monitoring**: Real-time network topology and status
+2. **Performance Analysis**: Detailed performance metrics and trends
+3. **Traffic Analysis**: Traffic patterns and protocol analysis
 
-```bash
-# Mininet logs
-docker logs mininet -f
+### Key Metrics Monitored
 
-# Ryu controller logs
-docker logs ryu_controller -f
+- **Switch Statistics**: Port counters, flow table utilization
+- **Traffic Metrics**: Bandwidth usage, packet rates, protocol distribution
+- **Network Performance**: Latency, jitter, packet loss
+- **Flow Rules**: Active flows, rule hit counts, aging statistics
 
-# Prometheus logs
-docker logs prometheus -f
+### Prometheus Metrics
 
-# Grafana logs
-docker logs grafana -f
-```
+Raw metrics are available at http://localhost:9090/metrics including:
+- OpenFlow port statistics
+- Flow table information
+- Switch capabilities
+- Traffic counters
 
-### Restart services
-
-```bash
-# Restart một service
-docker-compose restart mininet
-docker-compose restart ryu
-
-# Restart tất cả
-docker-compose restart
-```
-
-### Dừng hệ thống
-
-```bash
-# Dừng containers (giữ data)
-docker-compose stop
-
-# Dừng và xóa containers
-docker-compose down
-
-# Dừng và xóa cả volumes (xóa data)
-docker-compose down -v
-```
-
-### Rebuild containers
-
-```bash
-# Rebuild Ryu controller
-docker-compose build ryu
-docker-compose up -d ryu
-
-# Force recreate containers
-docker-compose up -d --force-recreate
-```
-
-## 🎯 Use Cases phổ biến
-
-### 1. Development & Testing
-
-```bash
-# Mode: Interactive (mặc định)
-docker-compose up -d
-docker attach mininet
-
-# Trong CLI:
-mininet> py mixed_traffic(60)
-mininet> py elephant_mouse_traffic(30)
-```
-
-### 2. Monitoring liên tục
-
-```yaml
-# docker-compose.yaml
-command: python3 /app/auto_start.py --mode continuous
-```
-
-```bash
-docker-compose up -d
-# Mở Grafana → Watch dashboards update real-time
-```
-
-### 3. Demo presentation
-
-```yaml
-command: python3 /app/auto_start.py --mode demo
-```
-
-```bash
-docker-compose up -d
-docker logs mininet -f  # Xem demo
-```
-
-## 🏗️ Kiến trúc hệ thống
-
-```
-┌─────────────────────────────────────────────────────┐
-│                Monitoring Stack                     │
-│  ┌──────────────┐            ┌──────────────┐       │
-│  │   Grafana    │◄───────────│  Prometheus  │       │
-│  │  (port 3000) │            │  (port 9091) │       │
-│  └──────────────┘            └───────┬──────┘       │
-│                                      │              │
-│                              Scrape metrics (5s)    │
-└──────────────────────────────────────┼──────────────┘
-                                       │
-                                       ▼
-┌─────────────────────────────────────────────────────┐
-│                  SDN Controller                     │
-│    ┌──────────────────────────────────────────┐     │
-│    │         Ryu Controller + Metrics         │     │
-│    │     (OpenFlow: 6653, Metrics: 9090)      │     │
-│    └──────────────┬───────────────────────────┘     │
-└───────────────────┼─────────────────────────────────┘
-                    │ OpenFlow Protocol
-                    ▼
-┌─────────────────────────────────────────────────────┐
-│                 Mininet                             |
-│    ┌──────────────────────────────────────────┐     │
-│    │    Spine-leaf Topo + Simulate traffic    │     │
-│    └──────────────────────────────────────────┘     │
-└─────────────────────────────────────────────────────┘
-```
-
-## 📋 Topology Details
-
-![Topology](./mininet/topo.png)
-
-- **2 Spine switches** (S1, S2) - DPID 1-2
-- **3 Leaf switches** (L1, L2, L3) - DPID 3-5
-- **9 Hosts** (h11-h13, h21-h23, h31-h33)
-- **IP range:** 10.0.0.0/24
-- **Links:** 
-  - Spine-Leaf: 10 Mbps, 1ms delay
-  - Leaf-Host: 1 Mbps
-- **ECMP:** Load balancing across spine switches
-
-## 🔍 Troubleshooting
-
-### Container không start
-
-```bash
-# Xem logs
-docker logs mininet
-docker logs ryu_controller
-
-# Check network
-docker network ls
-docker network inspect sdn_lab_sdn_net
-```
-
-### Không kết nối được Grafana
-
-```bash
-# Kiểm tra port
-netstat -an | grep 3000
-
-# Restart Grafana
-docker-compose restart grafana
-
-# Check logs
-docker logs grafana
-```
-
-### Metrics không hiển thị
-
-```bash
-# Kiểm tra Prometheus targets
-# Mở: http://localhost:9091/targets
-# Ryu endpoint (ryu:9090) phải UP
-
-# Test metrics endpoint trực tiếp
-docker exec -it ryu_controller curl http://localhost:9090/metrics
-```
-
-### Reset toàn bộ hệ thống
-
-```bash
-# Dừng và xóa tất cả
-docker-compose down -v
-
-# Xóa data directories (optional)
-sudo rm -rf grafana/data/* prometheus/data/*
-
-# Khởi động lại
-docker-compose up -d
-```
-
-## 📚 Tài liệu chi tiết
-
-- [**Mininet**](./mininet/README.md)
-- [**Ryu controller**](./ryu_controller/README.md) 
-- [**Prometheus**](./prometheus/README.md)
-- [**Grafana**](./grafana/README.md)
-
+---

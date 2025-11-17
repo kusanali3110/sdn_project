@@ -1,47 +1,38 @@
+import os
+import sys
+import yaml
 from mininet.topo import Topo
-from mininet.link import TCLink
-
-
 
 class SpineLeafTopo(Topo):
-	"""Spine-Leaf topology with 2 spines (S1,S2), 3 leaves (L1..L3),
-	and 3 hosts per leaf named H<leaf><host> (e.g., H11, H12, H13).
-	All hosts are in the same /24 subnet for L2 connectivity across fabric.
-	"""
+    def build(self, config_file="network_config.yaml"):
+        with open(config_file, "r") as file:
+            config = yaml.safe_load(file)
 
-	def build(self, num_spines=2, num_leaves=3, hosts_per_leaf=3):
-		# Create spines named S1..Sn
-		spines = []
-		for s in range(1, num_spines + 1):
-			# Stable DPIDs
-			dpid = "{:016x}".format(s)
-			sp = self.addSwitch("s{}".format(s), dpid=dpid, protocols='OpenFlow13')
-			spines.append(sp)
+        # Add switches
+        for switch_config in config["switches"]:
+            self.addSwitch(switch_config["name"])
 
-		# Create leaves named L1..Lm
-		leaves = []
-		for l in range(1, num_leaves + 1):
-			sw_id = num_spines + l
-			dpid = "{:016x}".format(sw_id)
-			leaf = self.addSwitch("l{}".format(l), dpid=dpid, protocols='OpenFlow13')
-			leaves.append(leaf)
+        # Add inter-switch links
+        for link_config in config["links"]:
+            self.addLink(
+                link_config["source"],
+                link_config["target"],
+                port1=link_config["source_port"],
+                port2=link_config["target_port"],
+            )
 
-			# Add hosts for this leaf named H<leaf><host>
-			for h in range(1, hosts_per_leaf + 1):
-				# IP scheme: 10.0.0.<leaf><host>/24 for L2 communication across leaves
-				last_octet = int("{}{}".format(l, h))
-				host = self.addHost(
-					"h{}{}".format(l, h),
-					ip="10.0.0.{}".format(last_octet) + "/24"
-				)
-				self.addLink(leaf, host, cls=TCLink, bw=1)
+        # Add hosts
+        for host_config in config["hosts"]:
+            self.addHost(
+                host_config["name"],
+                ip=host_config["ip"],
+                mac=host_config["mac"],
+                defaultRoute=host_config["default_route"],
+            )
+            self.addLink(
+                host_config["name"],
+                host_config["connected_to"],
+                port1=host_config["port"]
+            )
 
-		# Connect each leaf to all spines
-		for leaf in leaves:
-			for spine in spines:
-				# Use higher bandwidth on fabric links
-				self.addLink(leaf, spine, cls=TCLink, bw=10, delay='1ms')
-
-topos = { 'spineleaf': SpineLeafTopo }
-
-
+topos = {"spineleaf": SpineLeafTopo}
