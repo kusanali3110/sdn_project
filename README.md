@@ -52,30 +52,7 @@ sudo chmod +x /usr/local/bin/docker-compose
 # Docker Compose is included with Docker Desktop
 ```
 
-## 🚀 Quick Start
-
-1. **Clone the repository:**
-   ```bash
-   git clone https://github.com/kusanali3110/sdn_project
-   cd sdn_project
-   ```
-
-2. **Start the environment:**
-   ```bash
-   docker-compose up -d
-   ```
-
-3. **Verify containers are running:**
-   ```bash
-   docker ps
-   ```
-
-4. **Access the services:**
-   - **Grafana**: http://localhost:3000 (admin/admin)
-   - **Flow Manager**: http://localhost:8080
-   - **Prometheus**: http://localhost:9091
-
-## 📖 Detailed Setup
+## 📖 Get started
 
 ### Step 1: Environment Setup
 
@@ -106,7 +83,7 @@ mn --custom /app/spine_leaf.py --topo spineleaf --controller remote,ip=ryu,port=
 
 ### Step 3: Traffic Generation
 
-Once inside the Mininet CLI (`mininet>` prompt):
+Once inside the Mininet CLI after setting up network tpopology (`mininet>` prompt):
 
 ```bash
 # Start automated traffic generation
@@ -119,40 +96,9 @@ The traffic generator will:
 - Apply random bandwidth and timing parameters
 - Run continuously until stopped (Ctrl+C)
 
-## 🎯 Usage
-
-### Basic Network Operations
-
-```bash
-# Access Mininet CLI
-docker exec -it mininet bash
-mn --custom /app/spine_leaf.py --topo spineleaf --controller remote,ip=ryu,port=6653 --switch ovsk,protocols=OpenFlow13
-
-# In Mininet CLI
-mininet> pingall                    # Test connectivity
-mininet> iperf h1 h2                # Test bandwidth
-mininet> net                        # Show network topology
-mininet> dump                       # Show host processes
-```
-
-### Traffic Simulation
-
-```bash
-# Start traffic generation
-mininet> py exec(open('/app/traffic_generator.py').read())
-
-# Stop with Ctrl+C
-```
-
-### Flow Management
-
-Access the Flow Manager web interface at http://localhost:8080/home/index.html to:
-- View current flow rules
-- Add/modify flow entries
-- Monitor switch statistics
-- Manage SDN policies
-
 ## 🌐 Services & Endpoints
+
+After getting through above instructions, there are endpoints which will be available:
 
 | Service | URL | Description | Credentials |
 |---------|-----|-------------|-------------|
@@ -171,9 +117,17 @@ Access the Flow Manager web interface at http://localhost:8080/home/index.html t
 
 ## 📊 Monitoring & Visualization
 
+### Flow Management
+
+Access the Flow Manager web interface at http://localhost:8080/home/index.html to:
+- View current flow rules
+- Add/modify flow entries
+- Monitor switch statistics
+- Manage SDN policies
+
 ### Grafana Dashboards
 
-The system includes three pre-configured dashboards:
+The system will run at http://localhost:3000 which includes three pre-configured dashboards:
 
 1. **Network Monitoring**: Real-time network topology and status
 2. **Performance Analysis**: Detailed performance metrics and trends
