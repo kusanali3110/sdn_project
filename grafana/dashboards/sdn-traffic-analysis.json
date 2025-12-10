@@ -253,36 +253,11 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "rate(sdn_packets_by_protocol_total{protocol=\"TCP\"}[1m])",
-          "legendFormat": "TCP - {{dpid}}",
+          "editorMode": "code",
+          "expr": "sum by (protocol) (rate(sdn_packets_by_protocol_total[1m]))",
+          "legendFormat": "__auto",
+          "range": true,
           "refId": "A"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus"
-          },
-          "expr": "rate(sdn_packets_by_protocol_total{protocol=\"UDP\"}[1m])",
-          "legendFormat": "UDP - {{dpid}}",
-          "refId": "B"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus"
-          },
-          "expr": "rate(sdn_packets_by_protocol_total{protocol=\"ICMP\"}[1m])",
-          "legendFormat": "ICMP - {{dpid}}",
-          "refId": "C"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus"
-          },
-          "expr": "rate(sdn_packets_by_protocol_total{protocol=\"ARP\"}[1m])",
-          "legendFormat": "ARP - {{dpid}}",
-          "refId": "D"
         }
       ],
       "title": "Protocol Traffic Over Time",
@@ -1010,5 +985,5 @@
   "timezone": "browser",
   "title": "SDN Traffic Analysis",
   "uid": "sdn-traffic-analysis",
-  "version": 1
+  "version": 2
 }

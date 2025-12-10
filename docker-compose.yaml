@@ -25,7 +25,6 @@ services:
     privileged: true          # Quyền này để quản lý giao diện mạng
     tty: true                 # Giữ cho container chạy để có thể attach vào
     stdin_open: true          # Cho phép tương tác với container
-    entrypoint: ["/bin/bash"]  # Override ENTRYPOINT để tránh conflict
     environment:
       - SDN_CONTROLLER=ryu
     volumes:
