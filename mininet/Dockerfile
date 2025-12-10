@@ -23,5 +23,7 @@ RUN python3 -c "import mininet; print('Mininet imported successfully')" || \
 # Set working directory
 WORKDIR /app
 
-# Keep the original ENTRYPOINT from base image
-# We'll override it in docker-compose.yaml
+COPY start.sh /start.sh
+RUN chmod +x /start.sh
+
+ENTRYPOINT ["/start.sh"]

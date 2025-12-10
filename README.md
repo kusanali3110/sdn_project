@@ -74,9 +74,6 @@ docker ps -a
 # Access Mininet container
 docker exec -it mininet bash
 
-# Start Open vSwitch service
-service openvswitch-switch start
-
 # Create network topology with Ryu controller
 mn --custom /app/spine_leaf.py --topo spineleaf --controller remote,ip=ryu,port=6653 --switch ovsk,protocols=OpenFlow13
 ```

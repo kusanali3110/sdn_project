@@ -1,8 +1,0 @@
-# First, start openvswitch-switch
-service openvswitch-switch start
-
-# Start Mininet with custom topology
-mn --custom /app/spine_leaf.py --topo spineleaf --controller remote,ip=ryu,port=6653 --switch ovsk,protocols=OpenFlow13
-
-# After Mininet starts, in Mininet CLI:
-mininet> py exec(open('/app/traffic_generator.py').read())
