@@ -4,7 +4,7 @@ from ryu.ofproto import ofproto_v1_3
 
 class BaseSwitch(app_manager.RyuApp):
     """
-    Base Switch Application that includes some utility funtcions.
+    Base Switch Application bao gồm các hàm hữu dụng.
     """
 
     OFP_VERSIONS = [ofproto_v1_3.OFP_VERSION]
@@ -26,7 +26,7 @@ class BaseSwitch(app_manager.RyuApp):
         buffer_id=None,
     ):
         """
-        Compose a FlowMod message to add a flow entry and return the message.
+        Tạo message FlowMod để thêm flow entry và trả về message.
         """
 
         parser = datapath.ofproto_parser
@@ -54,7 +54,7 @@ class BaseSwitch(app_manager.RyuApp):
         out_group=0,
     ):
         """
-        Compose a FlowMod message to delete a flow entry and return the message.
+        Tạo message FlowMod để xóa flow entry và trả về message.
         """
 
         ofproto = datapath.ofproto
@@ -79,7 +79,7 @@ class BaseSwitch(app_manager.RyuApp):
     @staticmethod
     def forward_packet(datapath, data, in_port, out_port):
         """
-        Returns a PACKET_OUT message that sends a packet to a swith
+        Trả về message PACKET_OUT để gửi packet đến một switch
         """
 
         ofproto = datapath.ofproto
@@ -100,13 +100,13 @@ class BaseSwitch(app_manager.RyuApp):
     @staticmethod
     def send_messages(datapath, msg_list, barrier=False):
         """
-        Send all messages to the switch, followed by a Barrier request message, if requested.
+        Gửi tất cả messages đến switch, sau đó gửi message Barrier request, nếu yêu cầu.
         """
 
         for msg in msg_list:
             datapath.send_msg(msg)
 
         if barrier:
-            # Send_barrier_request
+            # Gửi message Barrier request
             parser = datapath.ofproto_parser
             datapath.send_msg(parser.OFPBarrierRequest(datapath))

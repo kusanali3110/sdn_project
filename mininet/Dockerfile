@@ -1,7 +1,7 @@
-# Dockerfile for Mininet with Python 3 support (https://github.com/iwaseyusuke/docker-mininet)
+# Dockerfile cho Mininet với Python 3 support (https://github.com/iwaseyusuke/docker-mininet)
 FROM iwaseyusuke/mininet:ubuntu-20.04
 
-# Update package list and install Python 3 dependencies
+# Cập nhật danh sách package và cài đặt Python 3 dependencies
 RUN apt-get update && apt-get install -y \
     python3 \
     python3-pip \
@@ -10,20 +10,20 @@ RUN apt-get update && apt-get install -y \
     netcat \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Mininet for Python 3
-# Option 1: Try to install via pip3 (simpler and faster)
+# Cài đặt Mininet cho Python 3
 RUN pip3 install mininet PyYAML || \
-    # Option 2: If pip install fails, create symlink from Python 2 installation
     (ln -s /usr/lib/python2.7/dist-packages/mininet /usr/local/lib/python3.8/dist-packages/mininet 2>/dev/null || true)
 
-# Verify Mininet is available for Python 3
+# Kiểm tra Mininet có khả dụng cho Python 3
 RUN python3 -c "import mininet; print('Mininet imported successfully')" || \
     echo "Warning: Mininet not available for Python 3 yet, will be handled by startup script"
 
-# Set working directory
+# Thiết lập working directory
 WORKDIR /app
 
+# Sao chép file start.sh vào container
 COPY start.sh /start.sh
+# Cấp quyền thực thi cho file start.sh
 RUN chmod +x /start.sh
 
 ENTRYPOINT ["/start.sh"]

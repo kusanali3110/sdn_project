@@ -18,7 +18,7 @@
   "editable": true,
   "fiscalYearStartMonth": 0,
   "graphTooltip": 1,
-  "id": 3,
+  "id": 4,
   "links": [],
   "panels": [
     {
@@ -437,9 +437,9 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "editorMode": "code",
+          "editorMode": "builder",
           "exemplar": false,
-          "expr": "sum by(dpid) (sdn_packet_in_processing_seconds_count)",
+          "expr": "sum by(dpid) (rate(sdn_packet_in_processing_seconds_count[1m]))",
           "interval": "",
           "legendFormat": "Switch {{dpid}}",
           "range": true,
@@ -689,7 +689,7 @@
               }
             ]
           },
-          "unit": "short"
+          "unit": "none"
         },
         "overrides": [
           {
@@ -703,6 +703,34 @@
                 "value": {
                   "type": "color-background"
                 }
+              },
+              {
+                "id": "custom.width",
+                "value": 225
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Source"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 261
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Protocol"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 261
               }
             ]
           }
@@ -732,9 +760,11 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "topk(20, rate(sdn_traffic_flows_total[5m]))",
+          "editorMode": "builder",
+          "expr": "sum by(src_ip, protocol) (rate(sdn_traffic_flows_total[$__rate_interval]))",
           "format": "table",
           "instant": true,
+          "legendFormat": "",
           "refId": "A"
         }
       ],
@@ -842,7 +872,8 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "topk(20, rate(sdn_tcp_connections_total[5m]))",
+          "editorMode": "builder",
+          "expr": "sum by(src_ip, dst_ip) (topk(20, rate(sdn_tcp_connections_total[$__rate_interval])))",
           "format": "table",
           "instant": true,
           "refId": "A"
@@ -1090,5 +1121,5 @@
   "timezone": "browser",
   "title": "SDN Performance Analysis",
   "uid": "sdn-performance-analysis",
-  "version": 4
+  "version": 1
 }

@@ -18,7 +18,7 @@
   "editable": true,
   "fiscalYearStartMonth": 0,
   "graphTooltip": 1,
-  "id": 4,
+  "id": 2,
   "links": [],
   "panels": [
     {
@@ -85,8 +85,10 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "sum(rate(sdn_packets_by_protocol_total[5m])) by (protocol)",
+          "editorMode": "builder",
+          "expr": "sum by(protocol) (rate(sdn_packets_by_protocol_total[$__rate_interval]))",
           "legendFormat": "{{protocol}}",
+          "range": true,
           "refId": "A"
         }
       ],
@@ -101,7 +103,7 @@
       "fieldConfig": {
         "defaults": {
           "color": {
-            "mode": "continuous-GrYlRd"
+            "mode": "palette-classic"
           },
           "custom": {
             "hideFrom": {
@@ -157,8 +159,10 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "sum(rate(sdn_packet_in_total[5m])) by (dpid)",
+          "editorMode": "builder",
+          "expr": "sum by(dpid) (rate(sdn_packet_in_total[$__rate_interval]))",
           "legendFormat": "Switch {{dpid}}",
+          "range": true,
           "refId": "A"
         }
       ],
@@ -253,7 +257,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "editorMode": "code",
+          "editorMode": "builder",
           "expr": "sum by (protocol) (rate(sdn_packets_by_protocol_total[1m]))",
           "legendFormat": "__auto",
           "range": true,
@@ -350,7 +354,8 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "topk(50, rate(sdn_traffic_flows_total[5m]))",
+          "editorMode": "builder",
+          "expr": "topk(50, rate(sdn_traffic_flows_total[$__rate_interval]))",
           "format": "table",
           "instant": true,
           "refId": "A"
@@ -985,5 +990,5 @@
   "timezone": "browser",
   "title": "SDN Traffic Analysis",
   "uid": "sdn-traffic-analysis",
-  "version": 2
+  "version": 1
 }

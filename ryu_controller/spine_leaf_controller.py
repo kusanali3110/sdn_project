@@ -20,7 +20,7 @@ from base_switch import BaseSwitch
 from utils import Network
 from metrics_exporter import SDNMetricsExporter
 
-# Protocol Names
+# Tên các giao thức
 ETHERNET = ethernet.ethernet.__name__
 # VLAN = vlan.vlan.__name__
 IPV4 = ipv4.ipv4.__name__
@@ -29,7 +29,7 @@ ICMP = icmp.icmp.__name__
 TCP = tcp.tcp.__name__
 UDP = udp.udp.__name__
 
-# Constants
+# Các hằng số
 ENTRY_TABLE = 0
 LOCAL_TABLE = 0
 REMOTE_TABLE = 1
@@ -38,7 +38,7 @@ MIN_PRIORITY = 0
 LOW_PRIORITY = 100
 MID_PRIORITY = 300
 
-# Set idle_time=0 to make flow entries permenant
+# Đặt idle_time=0 để flow entries không bị xóa
 LONG_IDLE_TIME = 60
 MID_IDLE_TIME = 40
 IDLE_TIME = 30
@@ -46,7 +46,7 @@ IDLE_TIME = 30
 
 class SpineLeaf3(BaseSwitch):
     """
-    A spine-leaf implementation with two tables using static network description.
+    Controller cho spine-leaf topology với hai bảng sử dụng mô tả mạng tĩnh.
     """
 
     OFP_VERSIONS = [ofproto_v1_3.OFP_VERSION]
@@ -54,22 +54,22 @@ class SpineLeaf3(BaseSwitch):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
-        # Create central MAC table
+        # Tạo bảng MAC chính
         self.mac_table = {}
         
-        # Track flow entries count per switch and table
+        # Theo dõi số lượng flow entries cho mỗi switch và bảng
         self.flow_entries_count = {}
         
-        # Initialize Prometheus metrics exporter
+        # Khởi tạo Prometheus metrics exporter
         metrics_port = int(os.environ.get("METRICS_PORT", 8000))
         self.metrics = SDNMetricsExporter(port=metrics_port)
         self.metrics.start_server()
         
-        # Initialize topology metrics
+        # Khởi tạo metrics topo
         self.metrics.update_switch_count('spine', len(net.spines))
         self.metrics.update_switch_count('leaf', len(net.leaves))
         
-        # Start periodic flow stats collection thread
+        # Bắt đầu thread thu thập flow stats theo chu kỳ
         self.flow_stats_interval = 10  # Request flow stats every 10 seconds
         self.monitor_thread = hub.spawn(self._monitor_flow_stats)
         
@@ -78,33 +78,33 @@ class SpineLeaf3(BaseSwitch):
     @set_ev_cls(ofp_event.EventOFPSwitchFeatures, CONFIG_DISPATCHER)
     def switch_features_handler(self, event):
         """
-        This method is called after the controller configures a switch.
+        Phương thức này được gọi sau khi controller cấu hình một switch.
         """
 
         datapath = event.msg.datapath
         ofproto = datapath.ofproto
         parser = datapath.ofproto_parser
 
-        # Update switch status metrics
+        # Cập nhật metrics trạng thái switch
         switch_type = 'leaf' if datapath.id in net.leaves else 'spine'
         self.metrics.update_switch_status(datapath.id, switch_type, 1)
 
-        # Create a message to delete all exiting flows
+        # Tạo message để xóa tất cả flow entries hiện có
         msgs = [self.del_flow(datapath)]
         self.metrics.increment_flow_mod(datapath.id, 'delete')
 
-        # Set Match to ANY
+        # Đặt Match là ANY
         match = parser.OFPMatch()
 
-        if datapath.id in net.leaves:  # For all leaf switches
-            # Add a table-miss entry for LOCAL_TABLE:
-            # Matched packets are sent to the next table
+        if datapath.id in net.leaves:  # Với tất cả switch leaf
+            # Thêm entry table-miss cho LOCAL_TABLE:
+            # Packet khớp được gửi đến bảng tiếp theo
             inst = [parser.OFPInstructionGotoTable(REMOTE_TABLE)]
             msgs += [self.add_flow(datapath, LOCAL_TABLE, MIN_PRIORITY, match, inst)]
             self.metrics.increment_flow_mod(datapath.id, 'add')
 
-            # Add a table-miss entry for REMOTE_TABLE:
-            # Matched packets are flooded and sent to the controller
+            # Thêm entry table-miss cho REMOTE_TABLE:
+            # Packet khớp được flood và gửi đến controller
             actions = [
                 parser.OFPActionOutput(ofproto.OFPP_ALL),
                 parser.OFPActionOutput(
@@ -115,24 +115,24 @@ class SpineLeaf3(BaseSwitch):
             msgs += [self.add_flow(datapath, REMOTE_TABLE, MIN_PRIORITY, match, inst)]
             self.metrics.increment_flow_mod(datapath.id, 'add')
 
-        else:  # For all spine switches
-            # Add a table-miss entry for ENTRY_TABLE to drop packets
+        else:  # Với tất cả switch spine
+            # Thêm entry table-miss cho ENTRY_TABLE để drop packets
             msgs += [self.add_flow(datapath, ENTRY_TABLE, MIN_PRIORITY, match, [])]
             self.metrics.increment_flow_mod(datapath.id, 'add')
 
-        # Send all messages to the switch
+        # Gửi tất cả messages đến switch
         self.send_messages(datapath, msgs)
         
-        # Request flow statistics to update metrics
+        # Yêu cầu flow stats để cập nhật metrics
         self.request_flow_stats(datapath)
 
     @set_ev_cls(ofp_event.EventOFPFlowStatsReply, MAIN_DISPATCHER)
     def flow_stats_reply_handler(self, event):
-        """Handle flow statistics reply from switches"""
+        """Xử lý flow stats reply từ switch"""
         datapath = event.msg.datapath
         dpid = datapath.id
         
-        # Count flows per table
+        # Đếm flows cho mỗi bảng
         table_flows = {}
         for stat in event.msg.body:
             table_id = stat.table_id
@@ -140,81 +140,80 @@ class SpineLeaf3(BaseSwitch):
                 table_flows[table_id] = 0
             table_flows[table_id] += 1
         
-        # Update metrics for each table
+        # Cập nhật metrics cho mỗi bảng
         for table_id, count in table_flows.items():
             self.metrics.update_flow_entries(dpid, table_id, count)
-            # Update local tracking
+            # Cập nhật tracking local
             self.flow_entries_count[(dpid, table_id)] = count
         
-        # Also update tables with 0 entries
+        # Cập nhật bảng với 0 entries
         if dpid in net.leaves:
             for table_id in [LOCAL_TABLE, REMOTE_TABLE]:
                 if table_id not in table_flows:
                     self.metrics.update_flow_entries(dpid, table_id, 0)
                     self.flow_entries_count[(dpid, table_id)] = 0
-        else:  # spine switch
+        else:  # switch spine
             if ENTRY_TABLE not in table_flows:
                 self.metrics.update_flow_entries(dpid, ENTRY_TABLE, 0)
                 self.flow_entries_count[(dpid, ENTRY_TABLE)] = 0
 
     @set_ev_cls(ofp_event.EventOFPPacketIn, MAIN_DISPATCHER)
     def packet_in_handler(self, event):
-        """Handle packet_in message.
+        """Xử lý message packet_in.
 
-        This method is called when a PacketIn message is received. The message
-        is sent by the switch to request processing of the packet by the
-        controller such as when a table miss occurs.
+        Phương thức này được gọi khi nhận được message PacketIn.
+        Message này được gửi bởi switch để yêu cầu xử lý packet bởi controller khi xảy ra table miss.
         """
         
-        # Start timing for performance metrics
+        # Bắt đầu đo thời gian cho metrics hiệu suất
         start_time = time.time()
 
-        # Get the originating switch from the event
+        # Lấy switch gốc từ event
         datapath = event.msg.datapath
         ofproto = datapath.ofproto
         parser = datapath.ofproto_parser
 
-        # Get the packet's ingress port from the event
+        # Lấy port ingress từ event
         in_port = event.msg.match["in_port"]
 
-        # Get the packet from the event
+        # Lấy packet từ event
         pkt = packet.Packet(event.msg.data)
 
-        # Extract head information from the packet and return as dictionary
+        # Trích xuất thông tin header từ packet và trả về dưới dạng dictionary
         header_list = dict(
             (p.protocol_name, p)
             for p in pkt.protocols
             if isinstance(p, packet_base.PacketBase)
         )
 
-        # Get the packet's source and destination MAC addresses
+        # Lấy địa chỉ MAC nguồn và đích từ packet
         eth = header_list[ETHERNET]
         dst = eth.dst
         src = eth.src
         
-        # Record packet size for bandwidth metrics
+        # Ghi lại kích thước packet cho metrics băng thông
         packet_size = len(event.msg.data)
         self.metrics.add_bytes_transmitted(datapath.id, 'in', packet_size)
 
-        # Update the MAC table and record metrics
+        # Cập nhật bảng MAC và ghi lại metrics
         self.update_mac_table(src, in_port, datapath.id)
 
-        # Remote switches are all leaf switches except the originating switch
+        # Switch remote là tất cả switch leaf trừ switch gốc
         remote_switches = list(set(net.leaves) - set([datapath.id]))
         
-        # Increment PacketIn counter
+        # Tăng counter PacketIn
         self.metrics.increment_packet_in(datapath.id, 'table_miss')
 
         if ARP in header_list:
-            # Record ARP packet
+            # Ghi lại packet ARP
             arp_pkt = header_list[ARP]
             arp_type = 'request' if arp_pkt.opcode == arp.ARP_REQUEST else 'reply'
             self.metrics.increment_arp_packets(datapath.id, arp_type)
             self.metrics.increment_protocol_packet('ARP', datapath.id)
             
-            # Send the packet to all remote switches to be flooded
+            # Gửi packet đến tất cả switch remote để được flood
             for leaf in remote_switches:
-                # Get the datapath object
+                # Lấy datapath object
                 dpath = get_datapath(self, leaf)
                 msgs = self.forward_packet(
                     dpath, event.msg.data, ofproto.OFPP_CONTROLLER, ofproto.OFPP_ALL
@@ -223,12 +222,11 @@ class SpineLeaf3(BaseSwitch):
                 self.metrics.increment_packets_flooded(dpath.id)
 
         elif IPV4 in header_list:
-            # Record IPv4 packet
+            # Ghi lại packet IPv4
             self.metrics.increment_protocol_packet('IPv4', datapath.id)
-            # In the originating switch:
+            # Trong switch gốc:
 
-            # Add a flow entry in LOCAL_TABLE to forward packets to the given
-            # output port if their destination MAC address matches this source
+            # Thêm entry flow trong LOCAL_TABLE để chuyển tiếp packet đến port đầu ra nếu địa chỉ MAC đích khớp với địa chỉ MAC nguồn
             match = parser.OFPMatch(eth_dst=src)
             actions = [parser.OFPActionOutput(in_port)]
             inst = [parser.OFPInstructionActions(ofproto.OFPIT_APPLY_ACTIONS, actions)]
@@ -245,7 +243,7 @@ class SpineLeaf3(BaseSwitch):
             self.send_messages(datapath, msgs)
             self.metrics.increment_flow_mod(datapath.id, 'add')
 
-            # Get the packet higher layer information if available
+            # Lấy thông tin layer cao hơn từ packet nếu có
             packet_info = self.get_ipv4_packet_info(pkt, header_list)
             self.logger.info(
                 f"Packet Info: {packet_info[0]}, {packet_info[1]} {packet_info[2]}, {packet_info[3]}, {packet_info[4]}"
@@ -254,11 +252,11 @@ class SpineLeaf3(BaseSwitch):
             packet_type = packet_info[0]
             protocol_name, src_ip, dst_ip, src_port, dst_port = packet_info
             
-            # Record protocol-specific metrics
+            # Ghi lại metrics cho giao thức cụ thể
             self.metrics.increment_protocol_packet(protocol_name, datapath.id)
             self.metrics.record_traffic_flow(src_ip, dst_ip, protocol_name)
             
-            # Record TCP/UDP connection metrics
+            # Ghi lại metrics cho kết nối TCP/UDP
             if protocol_name == TCP:
                 self.metrics.increment_tcp_connection(src_ip, dst_ip, dst_port)
             elif protocol_name == UDP:
@@ -267,22 +265,22 @@ class SpineLeaf3(BaseSwitch):
             dst_host = self.mac_table.get(dst)
 
             if dst_host:
-                # If the destination is in the MAC Table
+                # Nếu địa chỉ đích nằm trong bảng MAC
 
-                # If it is connected to a remote switch
+                # Nếu địa chỉ đích được kết nối với một switch remote
                 if dst_host["dpid"] in remote_switches:
-                    # Select a spine switch based on packet info
-                    # The selected spine must be the same in each direction
+                    # Chọn một switch spine dựa trên thông tin packet
+                    # Switch spine được chọn phải giống nhau trong mỗi hướng
                     spine_id = net.spines[
                         self.select_spine_from_packet_info(packet_info, len(net.spines))
                     ]
                     
-                    # Record spine selection
+                    # Ghi lại selection spine
                     self.metrics.increment_spine_selection(spine_id)
 
-                    # In the originating switch,
-                    # add an entry to the REMOTE_TABLE to forward packets
-                    # from the source to the destination towards the spine switch
+                    # Trong switch gốc,
+                    # thêm entry vào REMOTE_TABLE để chuyển tiếp packet
+                    # từ nguồn đến đích về phía switch spine
 
                     # in_port = net.links[datapath.id, spine_id]["port"]
                     upstream_port = net.links[datapath.id, spine_id]["port"]
@@ -298,9 +296,8 @@ class SpineLeaf3(BaseSwitch):
                     self.send_messages(datapath, msgs)
                     self.metrics.increment_flow_mod(datapath.id, 'add')
 
-                    # In the spine switch,
-                    # add two entries to forward packets between the source and
-                    # destination in both directions
+                    # Trong switch spine,
+                    # thêm hai entry để chuyển tiếp packet giữa nguồn và đích trong cả hai hướng
 
                     spine_datapath = get_datapath(self, spine_id)
                     dst_datapath = get_datapath(self, dst_host["dpid"])
@@ -319,9 +316,8 @@ class SpineLeaf3(BaseSwitch):
                     self.send_messages(spine_datapath, msgs)
                     self.metrics.increment_flow_mod(spine_id, 'add')
 
-                    # In the remote switch,
-                    # Send the received packet to the destination switch
-                    # to forward it.
+                    # Trong switch remote,
+                    # Gửi packet nhận được đến switch đích để chuyển tiếp.
                     remote_port = dst_host["port"]
                     msgs = self.forward_packet(
                         dst_datapath,
@@ -331,15 +327,15 @@ class SpineLeaf3(BaseSwitch):
                     )
                     self.send_messages(dst_datapath, msgs)
                     
-                    # Record remote forwarding metrics
+                    # Ghi lại metrics chuyển tiếp từ xa
                     self.metrics.record_remote_forwarding(datapath.id, dst_host["dpid"], spine_id)
                     self.metrics.increment_packets_forwarded(dst_datapath.id, remote_port)
 
             else:
-                # If the destination is not in the MAC Table
-                # Send the packet to all remote switches to be flooded
+                # Nếu địa chỉ đích không nằm trong bảng MAC
+                # Gửi packet đến tất cả switch remote để được flood
                 for leaf in remote_switches:
-                    # Get the datapath object
+                    # Lấy datapath object
                     dpath = get_datapath(self, leaf)
                     msgs = self.forward_packet(
                         dpath, event.msg.data, ofproto.OFPP_CONTROLLER, ofproto.OFPP_ALL
@@ -348,19 +344,19 @@ class SpineLeaf3(BaseSwitch):
                     self.send_messages(dpath, msgs)
                     self.metrics.increment_packets_flooded(dpath.id)
         
-        # Record packet processing time
+        # Ghi lại thời gian xử lý packet
         processing_time = time.time() - start_time
         self.metrics.packet_in_processing_time.labels(dpid=datapath.id).observe(processing_time)
 
     def update_mac_table(self, src, port, dpid):
         """
-        Set/Update the node information in the MAC table
-        the MAC table includes the input port and input switch
+        Thiết lập/cập nhật thông tin node trong bảng MAC
+        bao gồm port ingress và switch ingress
         """
 
         src_host = self.mac_table.get(src, {})
         
-        # Check if this is a new MAC address
+        # Kiểm tra nếu địa chỉ MAC này là mới
         if not src_host:
             self.metrics.record_mac_learned(dpid)
         
@@ -368,19 +364,24 @@ class SpineLeaf3(BaseSwitch):
         src_host["dpid"] = dpid
         self.mac_table[src] = src_host
         
-        # Update MAC table size metric
+        # Cập nhật kích thước bảng MAC cho metrics
         self.metrics.update_mac_table_size(len(self.mac_table))
         
         return src_host
 
-    def create_match_entry_at_leaf(
-        self, datapath, table, priority, idle_time, packet_info, out_port
-    ):
+    def create_match_entry_at_leaf(self, datapath, table, priority, idle_time, packet_info, out_port):
+        """
+        Tạo entry flow trong bảng MAC cho switch leaf
+        bao gồm port đầu ra và thông tin packet
+        """
+
         ofproto = datapath.ofproto
         parser = datapath.ofproto_parser
 
+        # Lấy thông tin packet từ packet_info
         protocol, src_ip, dst_ip, src_port, dst_port = packet_info
 
+        # Tạo match cho protocol TCP
         if protocol == TCP:
             match = parser.OFPMatch(
                 eth_type=ether_types.ETH_TYPE_IP,
@@ -390,6 +391,7 @@ class SpineLeaf3(BaseSwitch):
                 tcp_src=src_port,
                 tcp_dst=dst_port,
             )
+        # Tạo match cho protocol UDP
         elif protocol == UDP:
             match = parser.OFPMatch(
                 eth_type=ether_types.ETH_TYPE_IP,
@@ -399,40 +401,27 @@ class SpineLeaf3(BaseSwitch):
                 udp_src=src_port,
                 udp_dst=dst_port,
             )
+        # Tạo match cho protocol khác
         else:
             match = parser.OFPMatch(
                 eth_type=ether_types.ETH_TYPE_IP,
                 ipv4_src=src_ip,
                 ipv4_dst=dst_ip,
             )
+
+        # Tạo action đầu ra
         actions = [parser.OFPActionOutput(out_port)]
+        # Tạo instruction actions
         inst = [parser.OFPInstructionActions(ofproto.OFPIT_APPLY_ACTIONS, actions)]
-        msg = [
-            self.add_flow(
-                datapath,
-                table,
-                priority,
-                match,
-                inst,
-                i_time=idle_time,
-            )
-        ]
+        # Tạo message để thêm entry flow
+        msg = [self.add_flow(datapath, table, priority, match, inst, i_time=idle_time)]
 
         return msg
 
-    def create_match_entry_at_spine(
-        self,
-        datapath,
-        table,
-        priority,
-        packet_info,
-        in_port,
-        out_port,
-        i_time,
-    ):
+    def create_match_entry_at_spine(self, datapath, table, priority, packet_info, in_port, out_port, i_time):
         """
-        Returns MOD messages to add two flow entries allowing packets between
-        two nodes
+        Tạo entry flow trong bảng MAC cho switch spine
+        bao gồm port ingress và port egress
         """
 
         ofproto = datapath.ofproto
@@ -440,6 +429,7 @@ class SpineLeaf3(BaseSwitch):
 
         protocol, src_ip, dst_ip, src_port, dst_port = packet_info
 
+        # Tạo match cho protocol TCP
         if protocol == TCP:
             match = parser.OFPMatch(
                 in_port=in_port,
@@ -450,6 +440,7 @@ class SpineLeaf3(BaseSwitch):
                 tcp_src=src_port,
                 tcp_dst=dst_port,
             )
+        # Tạo match cho protocol UDP
         elif protocol == UDP:
             match = parser.OFPMatch(
                 in_port=in_port,
@@ -460,6 +451,7 @@ class SpineLeaf3(BaseSwitch):
                 udp_src=src_port,
                 udp_dst=dst_port,
             )
+        # Tạo match cho protocol khác
         else:
             match = parser.OFPMatch(
                 in_port=in_port,
@@ -467,14 +459,18 @@ class SpineLeaf3(BaseSwitch):
                 ipv4_src=src_ip,
                 ipv4_dst=dst_ip,
             )
+
+        # Tạo action đầu ra
         actions = [parser.OFPActionOutput(out_port)]
+        # Tạo instruction actions
         inst = [parser.OFPInstructionActions(ofproto.OFPIT_APPLY_ACTIONS, actions)]
+        # Tạo message để thêm entry flow
         msgs = [self.add_flow(datapath, table, priority, match, inst, i_time=i_time)]
 
         return msgs
 
     def get_ipv4_packet_info(self, pkt, header_list):
-        """Get IPv4 packet header information"""
+        """Lấy thông tin header packet IPv4"""
 
         ip_pkt = header_list[IPV4]
         src_ip = ip_pkt.src
@@ -491,8 +487,8 @@ class SpineLeaf3(BaseSwitch):
         return ICMP, src_ip, dst_ip, 0, 0
 
     def select_spine_from_packet_info(self, packet_info, num_spines):
-        """Select spine switch based source and destination IP addresses
-        and TCP/UDP port numbers"""
+        """Chọn switch spine dựa trên địa chỉ IP nguồn và đích
+        và port TCP/UDP nguồn và đích (hash function)"""
 
         _, src_ip, dst_ip, src_port, dst_port = packet_info
         srcip_as_num = sum(map(int, src_ip.split(".")))
@@ -501,21 +497,21 @@ class SpineLeaf3(BaseSwitch):
         return (srcip_as_num + dstip_as_num + src_port + dst_port) % num_spines
 
     def request_flow_stats(self, datapath):
-        """Request flow statistics from a switch"""
+        """Yêu cầu flow stats từ một switch"""
         ofproto = datapath.ofproto
         parser = datapath.ofproto_parser
         
-        # Request all flow stats from all tables
+        # Yêu cầu tất cả flow stats từ tất cả bảng
         req = parser.OFPFlowStatsRequest(datapath)
         datapath.send_msg(req)
 
     def _monitor_flow_stats(self):
-        """Background thread to periodically request flow statistics from all switches"""
+        """Thread nền để yêu cầu flow stats từ tất cả switch theo chu kỳ"""
         while True:
-            # Wait for the specified interval
+            # Chờ khoảng thời gian chỉ định
             hub.sleep(self.flow_stats_interval)
             
-            # Request flow stats from all switches
+            # Yêu cầu flow stats từ tất cả switch
             all_switches = net.spines + net.leaves
             for dpid in all_switches:
                 datapath = get_datapath(self, dpid)

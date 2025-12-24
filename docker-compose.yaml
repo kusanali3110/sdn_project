@@ -1,11 +1,11 @@
 services:
   ryu:
-    build: ./ryu_controller  # Build từ Dockerfile trong thư mục ryu_controller
+    build: ./ryu_controller
     container_name: ryu_controller
     ports:
-      - "6653:6653"   # OpenFlow protocol
-      - "8080:8080"   # FlowManager
-      - "8000:8000"   # Prometheus metrics
+      - "6653:6653"   # Cổng OpenFlow
+      - "8080:8080"   # Cổng FlowManager
+      - "8000:8000"   # Cổng Prometheus metrics
     command: ["ryu-manager", "--observe-links", "flowmanager/flowmanager.py", "/app/spine_leaf_controller.py"]
     environment:
       - NETWORK_CONFIG_FILE=/app/network_config.yaml
@@ -20,7 +20,7 @@ services:
       - sdn_net
 
   mininet:
-    build: ./mininet          # Build từ Dockerfile với Python 3 support
+    build: ./mininet
     container_name: mininet
     privileged: true          # Quyền này để quản lý giao diện mạng
     tty: true                 # Giữ cho container chạy để có thể attach vào
@@ -34,15 +34,18 @@ services:
       - /tmp/.X11-unix:/tmp/.X11-unix
       - /lib/modules:/lib/modules
     depends_on:
-      - ryu                   # Đảm bảo 'ryu' khởi động trước 'mininet'
+      - ryu
     networks:
       - sdn_net
+  # Để khởi động Mininet với custom topo và traffic generator:
+  # mn --custom spine_leaf.py --topo spineleaf --controller remote,ip=ryu,port=6653 --switch ovsk,protocols=OpenFlow13
+  # mininet> py exec(open('/app/traffic_generator.py').read())
 
   prometheus:
     image: prom/prometheus:v3.7.2
     container_name: prometheus
     ports:
-      - "9090:9090"   # Prometheus UI
+      - "9090:9090"   # Cổng Prometheus UI
     command:
       - '--config.file=/etc/prometheus/prometheus.yml'
       - '--storage.tsdb.path=/prometheus'
@@ -63,7 +66,7 @@ services:
     image: grafana/grafana:12.2.1
     container_name: grafana
     ports:
-      - "3000:3000"
+      - "3000:3000"   # Cổng Grafana
     networks:
       - sdn_net
     volumes:

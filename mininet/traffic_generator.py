@@ -7,10 +7,10 @@ import sys
 
 setLogLevel("info")
 
-# Signal handler for graceful shutdown
+# Xử lý signal để dừng generator traffic
 def signal_handler(sig, frame):
     info("\n*** Stopping traffic generator...\n")
-    # Kill all running iperf processes
+    # Kill tất cả các process iperf đang chạy
     for h in hosts:
         h.cmd("pkill -f iperf")
     info("*** Traffic generator stopped\n")
@@ -18,37 +18,37 @@ def signal_handler(sig, frame):
 
 signal.signal(signal.SIGINT, signal_handler)
 
-# Get hosts
+# Lấy danh sách hosts
 host_names = ["h1", "h2", "h3", "h4", "h5", "h6"]
 hosts = []
 for h in host_names:
     hosts.append(net.get(h))
 
-# Traffic protocols and parameters
+# Các protocol và tham số cho traffic generator
 protocols = ['tcp', 'udp', 'ping']
 tcp_streams_options = [1, 2, 4, 8]
 bandwidth_options = [50, 100, 200, 500, 1000]  # Kbps
 ping_count_options = [5, 10, 20]
 
-info("*** Starting continuous traffic generator (Ctrl+C to stop)\n")
+info("*** Bắt đầu tạo traffic liên tục (Ctrl+C để dừng)\n")
 
-# Start iperf server on all hosts for TCP/UDP traffic
+# Bắt đầu server iperf trên tất cả hosts cho traffic TCP/UDP
 for h in hosts:
     h.cmd("iperf -s -D")  # -D runs in daemon mode
 
-# Main traffic generation loop
+# Vòng lặp chính để tạo traffic liên tục
 while True:
-    # Randomly select protocol
+    # Chọn protocol ngẫu nhiên
     protocol = random.choice(protocols)
 
-    # Randomly select source and destination (ensure they're different)
+    # Chọn source và destination ngẫu nhiên (đảm bảo khác nhau)
     src_host = random.choice(hosts)
     dst_host = random.choice(hosts)
     while dst_host == src_host:
         dst_host = random.choice(hosts)
 
     if protocol in ['tcp', 'udp']:
-        # Generate iperf traffic
+        # Tạo traffic iperf
         duration = random.randint(5, 30)  # Random duration 5-30 seconds
         streams = random.choice(tcp_streams_options)
         bandwidth = random.choice(bandwidth_options)
@@ -65,7 +65,7 @@ while True:
         )
 
     elif protocol == 'ping':
-        # Generate ping traffic
+        # Tạo traffic ping
         count = random.choice(ping_count_options)
         interval = random.uniform(0.1, 1.0)  # Random interval between pings
 
@@ -76,7 +76,7 @@ while True:
             f"ping -c {count} -i {interval} {dst_host.IP()} > /dev/null 2>&1 &"
         )
 
-    # Wait for random cycle time (1-5 seconds)
+    # Chờ thời gian cycle ngẫu nhiên (1-5 giây)
     cycle_time = random.uniform(1, 5)
     info(f"*** Waiting {cycle_time:.1f} seconds before next traffic...\n")
     time.sleep(cycle_time)

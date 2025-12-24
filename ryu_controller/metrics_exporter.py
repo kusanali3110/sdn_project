@@ -7,21 +7,21 @@ import logging
 
 class SDNMetricsExporter:
     """
-    Prometheus Metrics Exporter for SDN Network Monitoring
-    Provides detailed metrics about network topology, flows, packets, and switch states
+    Prometheus Metrics Exporter cho việc theo dõi mạng SDN
+    Cung cấp các metrics chi tiết về topo mạng, flows, packets, và trạng thái của switches
     """
 
     def __init__(self, port=8000):
         """
-        Initialize all Prometheus metrics for SDN monitoring
+        Khởi tạo tất cả Prometheus metrics cho việc theo dõi mạng SDN
         
         Args:
-            port: Port number for HTTP server (default: 8000)
+            port: Cổng số cho HTTP server (mặc định: 8000)
         """
         self.port = port
         self.logger = logging.getLogger(self.__class__.__name__)
         
-        # Controller Info
+        # Thông tin Controller
         self.controller_info = Info(
             'sdn_controller',
             'Information about the SDN controller'
@@ -32,7 +32,7 @@ class SDNMetricsExporter:
             'topology': 'spine-leaf'
         })
         
-        # Topology Metrics
+        # Metrics Topology
         self.switch_count = Gauge(
             'sdn_switches_total',
             'Total number of switches connected',
@@ -51,7 +51,7 @@ class SDNMetricsExporter:
             ['dpid', 'port_no']
         )
         
-        # MAC Table Metrics
+        # Metrics MAC Table
         self.mac_table_size = Gauge(
             'sdn_mac_table_size',
             'Number of entries in MAC address table'
@@ -63,7 +63,7 @@ class SDNMetricsExporter:
             ['dpid']
         )
         
-        # Flow Table Metrics
+        # Metrics Flow Table
         self.flow_entries_total = Gauge(
             'sdn_flow_entries_total',
             'Total number of flow entries installed',
@@ -82,7 +82,7 @@ class SDNMetricsExporter:
             ['dpid', 'reason']
         )
         
-        # Packet Processing Metrics
+        # Metrics xử lý packet
         self.packet_in_total = Counter(
             'sdn_packet_in_total',
             'Total number of PacketIn messages received',
@@ -102,7 +102,7 @@ class SDNMetricsExporter:
             buckets=(0.0001, 0.0005, 0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1.0)
         )
         
-        # Traffic Flow Metrics
+        # Metrics luồng traffic
         self.traffic_flows = Counter(
             'sdn_traffic_flows_total',
             'Total traffic flows between hosts',
@@ -115,7 +115,7 @@ class SDNMetricsExporter:
             ['spine_id']
         )
         
-        # Packet Forwarding Metrics
+        # Metrics chuyển tiếp packet
         self.packets_forwarded = Counter(
             'sdn_packets_forwarded_total',
             'Total packets forwarded by the controller',
@@ -128,21 +128,21 @@ class SDNMetricsExporter:
             ['dpid']
         )
         
-        # ARP Metrics
+        # Metrics ARP
         self.arp_packets = Counter(
             'sdn_arp_packets_total',
             'Total ARP packets processed',
             ['dpid', 'arp_type']
         )
         
-        # Error Metrics
+        # Metrics lỗi
         self.errors_total = Counter(
             'sdn_errors_total',
             'Total errors encountered',
             ['error_type', 'dpid']
         )
         
-        # Connection Metrics
+        # Metrics kết nối
         self.tcp_connections = Counter(
             'sdn_tcp_connections_total',
             'Total TCP connections observed',
@@ -155,21 +155,21 @@ class SDNMetricsExporter:
             ['src_ip', 'dst_ip', 'dst_port']
         )
         
-        # Bandwidth Metrics (estimated from packet sizes)
+        # Metrics băng thông (ước tính từ kích thước packet)
         self.bytes_transmitted = Counter(
             'sdn_bytes_transmitted_total',
             'Total bytes transmitted through the network',
             ['dpid', 'direction']
         )
         
-        # Table Statistics
+        # Thống kê bảng
         self.table_miss_total = Counter(
             'sdn_table_miss_total',
             'Total table miss events',
             ['dpid', 'table_id']
         )
         
-        # Performance Metrics
+        # Metrics hiệu suất
         self.flow_setup_time = Histogram(
             'sdn_flow_setup_seconds',
             'Time taken to setup a new flow',
@@ -177,7 +177,7 @@ class SDNMetricsExporter:
             buckets=(0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1.0, 2.0)
         )
         
-        # Remote forwarding metrics
+        # Metrics chuyển tiếp từ xa
         self.remote_forwarding = Counter(
             'sdn_remote_forwarding_total',
             'Total packets forwarded to remote switches',
@@ -185,9 +185,9 @@ class SDNMetricsExporter:
         )
     
     def start_server(self):
-        """Start Prometheus HTTP server in a separate thread"""
+        """Bắt đầu server Prometheus HTTP trong một thread riêng biệt"""
         class ThreadedWSGIServer(ThreadingMixIn, WSGIServer):
-            """Threaded WSGI server for handling concurrent requests"""
+            """Server WSGI để xử lý yêu cầu đồng thời"""
             daemon_threads = True
         
         def run_server():
@@ -203,58 +203,58 @@ class SDNMetricsExporter:
         thread.start()
         return thread
     
-    # Helper methods for updating metrics
+    # Các hàm hỗ trợ để cập nhật metrics
     
     def increment_packet_in(self, dpid, reason='table_miss'):
-        """Increment PacketIn counter"""
+        """Tăng counter PacketIn"""
         self.packet_in_total.labels(dpid=dpid, reason=reason).inc()
     
     def increment_protocol_packet(self, protocol, dpid):
-        """Increment protocol-specific packet counter"""
+        """Tăng counter packet cụ thể cho protocol"""
         self.packets_by_protocol.labels(protocol=protocol, dpid=dpid).inc()
     
     def record_mac_learned(self, dpid):
-        """Record a new MAC address learned"""
+        """Ghi lại địa chỉ MAC học được"""
         self.mac_learned.labels(dpid=dpid).inc()
     
     def update_mac_table_size(self, size):
-        """Update MAC table size"""
+        """Cập nhật kích thước bảng MAC"""
         self.mac_table_size.set(size)
     
     def increment_flow_mod(self, dpid, command='add'):
-        """Increment FlowMod counter"""
+        """Tăng counter FlowMod"""
         self.flow_mod_sent.labels(dpid=dpid, command=command).inc()
     
     def increment_spine_selection(self, spine_id):
-        """Increment spine selection counter"""
+        """Tăng counter chọn spine"""
         self.spine_selection.labels(spine_id=spine_id).inc()
     
     def record_traffic_flow(self, src_ip, dst_ip, protocol):
-        """Record a traffic flow"""
+        """Ghi lại luồng traffic"""
         self.traffic_flows.labels(src_ip=src_ip, dst_ip=dst_ip, protocol=protocol).inc()
     
     def increment_packets_forwarded(self, dpid, out_port):
-        """Increment packets forwarded counter"""
+        """Tăng counter packet chuyển tiếp"""
         self.packets_forwarded.labels(dpid=dpid, out_port=out_port).inc()
     
     def increment_packets_flooded(self, dpid):
-        """Increment packets flooded counter"""
+        """Tăng counter packet lặp lại"""
         self.packets_flooded.labels(dpid=dpid).inc()
     
     def increment_arp_packets(self, dpid, arp_type='request'):
-        """Increment ARP packet counter"""
+        """Tăng counter packet ARP"""
         self.arp_packets.labels(dpid=dpid, arp_type=arp_type).inc()
     
     def increment_tcp_connection(self, src_ip, dst_ip, dst_port):
-        """Record TCP connection"""
+        """Ghi lại kết nối TCP"""
         self.tcp_connections.labels(src_ip=src_ip, dst_ip=dst_ip, dst_port=dst_port).inc()
     
     def increment_udp_flow(self, src_ip, dst_ip, dst_port):
-        """Record UDP flow"""
+        """Ghi lại luồng UDP"""
         self.udp_flows.labels(src_ip=src_ip, dst_ip=dst_ip, dst_port=dst_port).inc()
     
     def record_remote_forwarding(self, src_dpid, dst_dpid, via_spine):
-        """Record remote forwarding event"""
+        """Ghi lại sự kiện chuyển tiếp từ xa"""
         self.remote_forwarding.labels(
             src_dpid=src_dpid, 
             dst_dpid=dst_dpid, 
@@ -262,26 +262,26 @@ class SDNMetricsExporter:
         ).inc()
     
     def increment_table_miss(self, dpid, table_id):
-        """Increment table miss counter"""
+        """Tăng counter miss bảng"""
         self.table_miss_total.labels(dpid=dpid, table_id=table_id).inc()
     
     def record_error(self, error_type, dpid='unknown'):
-        """Record an error"""
+        """Ghi lại lỗi"""
         self.errors_total.labels(error_type=error_type, dpid=dpid).inc()
     
     def update_switch_count(self, switch_type, count):
-        """Update switch count"""
+        """Cập nhật số lượng switch"""
         self.switch_count.labels(switch_type=switch_type).set(count)
     
     def update_switch_status(self, dpid, switch_type, status):
-        """Update switch status (1=connected, 0=disconnected)"""
+        """Cập nhật trạng thái switch (1=connected, 0=disconnected)"""
         self.switch_status.labels(dpid=dpid, switch_type=switch_type).set(status)
     
     def update_flow_entries(self, dpid, table_id, count):
-        """Update flow entries count"""
+        """Cập nhật số lượng flow entries"""
         self.flow_entries_total.labels(dpid=dpid, table_id=table_id).set(count)
     
     def add_bytes_transmitted(self, dpid, direction, bytes_count):
-        """Add bytes transmitted"""
+        """Thêm bytes được truyền"""
         self.bytes_transmitted.labels(dpid=dpid, direction=direction).inc(bytes_count)
 
