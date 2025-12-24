@@ -110,6 +110,6 @@ Hệ thống được truy cập tại http://localhost:3000 bao gồm 3 dashboa
 
 ### Prometheus Metrics
 
-Raw metrics có thể được xem tại http://localhost:9090/metrics
-Truy cập Prometheus UI tại http://localhost:9091 để có thể truy vấn metrics hoặc thiết lập các exporter...
+- Raw metrics có thể được xem tại http://localhost:9090/metrics
+- Truy cập Prometheus UI tại http://localhost:9091 để có thể truy vấn metrics hoặc thiết lập các exporter...
 ---
