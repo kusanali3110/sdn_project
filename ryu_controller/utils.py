@@ -3,7 +3,7 @@ import sys
 
 class Network:
     """
-    Network definition
+    Định nghĩa mạng
     """
 
     def __init__(self, config_file):

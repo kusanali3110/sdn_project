@@ -1,101 +1,80 @@
-# SDN Monitoring System
+# Hệ thống giám sát mạng SDN
 
-A comprehensive Software-Defined Networking (SDN) laboratory environment featuring automated traffic generation, real-time monitoring, and advanced visualization capabilities. Built with Mininet, Ryu SDN controller, Prometheus metrics collection, and Grafana dashboards.
+Đồ án giám sát mạng SDN cùng với các tính năng như tạo traffic ngẫu nhiên, giám sát thời gian thực và các chức năng hiển thị thông tin giám sát. Được chạy với Mininet topology trên OpenVSwitch, Ryu SDN controller, trình thu thập metrics Prometheus và dashboard trên Grafana.
 
-## ✨ Features
+## Các tính năng
 
-- **🏗️ Complete SDN Lab Environment**: Pre-configured Mininet topology with spine-leaf architecture
-- **🎛️ Ryu SDN Controller**: Custom controller with advanced routing and monitoring capabilities
-- **📊 Real-time Monitoring**: Prometheus metrics collection from SDN switches
-- **📈 Advanced Visualization**: Grafana dashboards for network performance analysis
-- **🚀 Automated Traffic Generation**: Random traffic patterns with multiple protocols (TCP, UDP, ICMP)
-- **🔄 Flow Management**: Web-based interface for flow rule management
-- **🐳 Containerized**: Fully dockerized environment for easy deployment
-- **📈 Performance Metrics**: Comprehensive network statistics and analytics
+- **🏗️ Complete SDN Lab Environment**: Môi trường thực hành mạng SDN đầy đủ: Mininet topology đã được cấu hình với kiến trúc mạng Spine-leaf
+- **🎛️ Ryu SDN Controller**: Controller tùy chỉnh với các khả năng định tuyến và giám sát nâng cao
+- **📊 Giám sát thời gian thực**: Prometheus metrics được thu thập trực tiếp từ controller
+- **📈 Dữ liệu trực quan**: Grafana dashboards để giám sát và phân tích hiệu suất mạng
+- **🚀 Tạo lưu lượng tự động**: Các lưu lượng ngẫu nhiên với nhiều giao thức (TCP, UDP, ICMP)
+- **🔄 Trình quản lý Flow**: Giao diện web để quản lý flow rule
+- **🐳 Container hóa**: Môi trường thực hành trên các container để dễ dàng triển khai
 
 ### Network Topology
 
-The lab implements a spine-leaf data center topology with:
-- **2 Spine Switches**: Core layer for inter-rack connectivity
-- **4 Leaf Switches**: Edge layer connecting to servers
-- **6 Hosts**: Simulating end devices (h1-h6)
+Triển khai kiến trúc Spine-leaf mô phỏng các data center với
+- **2 Spine Switches**: Core layer cho kết nối inter-rack
+- **4 Leaf Switches**: Edge layer để kết nối đến các host
+- **6 Hosts**: Mô phỏng các thiết bị (h1 - h6)
 
 ![Network Topology](./mininet/topo.png)
 
-## 📋 Prerequisites
+## 📋 Yêu cầu hệ thống
 
-- **Docker**: Version 20.10 or later
-- **Docker Compose**: Version 2.0 or later
-- **Git**: For cloning the repository
-- **Web Browser**: For accessing web interfaces
-- **Minimum System Requirements**:
+- **Docker**: Phiên bản 20.10 hoặc mới hơn
+- **Docker Compose**: Phiên bản 2.0 hoặc mới hơn
+- **Git**: Để clone repo này
+- **Cấu hình hệ thống tối thiểu**:
   - CPU: 2 cores
   - RAM: 4GB
-  - Disk: 2GB free space
+  - Disk: 2GB ổ đĩa trống
 
-### Installing Prerequisites
+## 📖 Thực hiện
 
-**Ubuntu/Debian:**
-```bash
-# Install Docker
-curl -fsSL https://get.docker.com -o get-docker.sh
-sudo sh get-docker.sh
-
-# Install Docker Compose
-sudo curl -L "https://github.com/docker/compose/releases/download/v2.24.0/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
-sudo chmod +x /usr/local/bin/docker-compose
-```
-
-**Windows:**
-```powershell
-# Install Docker Desktop from https://www.docker.com/products/docker-desktop
-# Docker Compose is included with Docker Desktop
-```
-
-## 📖 Get started
-
-### Step 1: Environment Setup
+### Bước 1: Thiết lập môi trường
 
 ```bash
-# Clone repository
+# Clone repo
 git clone https://github.com/kusanali3110/sdn_project
 cd sdn_project
 
-# Start all services
+# Khởi động các container service
 docker-compose up -d
 
-# Verify all containers are running
+# Kiểm tra rằng các container đang chạy
 docker ps -a
 ```
 
-### Step 2: Network Topology Setup
+### Bước 2: Thiết lập network topo
 
 ```bash
-# Access Mininet container
+# Truy cập vào container Mininet
 docker exec -it mininet bash
 
-# Create network topology with Ryu controller
+# Tạo network topo kết nối đến Ryu controller
 mn --custom /app/spine_leaf.py --topo spineleaf --controller remote,ip=ryu,port=6653 --switch ovsk,protocols=OpenFlow13
 ```
 
-### Step 3: Traffic Generation
+### Bước 3: Tạo traffic ngẫu nhiên
 
-Once inside the Mininet CLI after setting up network tpopology (`mininet>` prompt):
+Khi đã ở bên trong Mininet CLI sau khi thiết lập network topo tại bước 2 (đầu vào `mininet>`):
 
 ```bash
-# Start automated traffic generation
+# Khởi động tạo traffic
 mininet> py exec(open('/app/traffic_generator.py').read())
 ```
 
-The traffic generator will:
-- Generate random TCP/UDP/Ping traffic
-- Use random source/destination pairs
-- Apply random bandwidth and timing parameters
-- Run continuously until stopped (Ctrl+C)
+Traffic generator sẽ:
+- Tạo ngẫu nhiên lưu tượng TCP/UDP/Ping
+- Chọn cặp host nguồn/đích ngẫu nhiên
+- Sử dụng bandwidth và timing ngẫu nhiên
+- Chạy liên tục cho đến khi dừng lại thủ công (Ctrl + C)
 
-## 🌐 Services & Endpoints
+## 🌐 Các Endpoint
 
-After getting through above instructions, there are endpoints which will be available:
+Sau khi thực hiện các hướng dẫn ở trên, các endpoint sau đây sẽ có thể được truy cập:
 
 | Service | URL | Description | Credentials |
 |---------|-----|-------------|-------------|
@@ -104,45 +83,33 @@ After getting through above instructions, there are endpoints which will be avai
 | **Prometheus** | http://localhost:9091 | Metrics Collection | - |
 | **Metrics** | http://localhost:9090/metrics | Raw Metrics Endpoint | - |
 
-### Default Ports Mapping
-
-- **Ryu Controller**: Container port 6653 → Host port 6653
-- **Flow Manager**: Container port 8080 → Host port 8080
-- **Prometheus**: Container port 9090 → Host port 9091
-- **Grafana**: Container port 3000 → Host port 3000
-- **Metrics Exporter**: Container port 8000 → Host port 9090
-
 ## 📊 Monitoring & Visualization
 
 ### Flow Management
 
-Access the Flow Manager web interface at http://localhost:8080/home/index.html to:
-- View current flow rules
-- Add/modify flow entries
-- Monitor switch statistics
-- Manage SDN policies
+Truy cập giao diện web Flow Manager tại http://localhost:8080/home/index.html để:
+- Xem các flow rule hiện tại
+- Thêm/chỉnh sửa các flow entry
+- Giám sát thông số switch
+- Quản lý SDN policies
 
 ### Grafana Dashboards
 
-The system will run at http://localhost:3000 which includes three pre-configured dashboards:
+Hệ thống được truy cập tại http://localhost:3000 bao gồm 3 dashboard đã được cấu hình trước:
 
-1. **Network Monitoring**: Real-time network topology and status
-2. **Performance Analysis**: Detailed performance metrics and trends
-3. **Traffic Analysis**: Traffic patterns and protocol analysis
+1. **Network Monitoring**: Network topo và trạng thái mạng thời gian thực
+2. **Performance Analysis**: Chi tiết về hiệu suất mạng
+3. **Traffic Analysis**: Traffic patterns và phân tích về giao thức
 
-### Key Metrics Monitored
+### Các key metrics được giám sát
 
-- **Switch Statistics**: Port counters, flow table utilization
-- **Traffic Metrics**: Bandwidth usage, packet rates, protocol distribution
-- **Network Performance**: Latency, jitter, packet loss
-- **Flow Rules**: Active flows, rule hit counts, aging statistics
+- **Thông số switch**: Số port và mức sử dụng của flow table
+- **Traffic metrics**: Băng thông sử dụng, tỷ lệ gói tin và phân phối protocol
+- **Hiệu suất mạng**: Độ trễ, jitter, packet loss
+- **Flow Rules**: Các flow đang hoạt động, rule hit counts, thời gian tồn tại
 
 ### Prometheus Metrics
 
-Raw metrics are available at http://localhost:9090/metrics including:
-- OpenFlow port statistics
-- Flow table information
-- Switch capabilities
-- Traffic counters
-
+Raw metrics có thể được xem tại http://localhost:9090/metrics
+Truy cập Prometheus UI tại http://localhost:9091 để có thể truy vấn metrics hoặc thiết lập các exporter...
 ---

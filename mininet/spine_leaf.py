@@ -8,11 +8,9 @@ class SpineLeafTopo(Topo):
         with open(config_file, "r") as file:
             config = yaml.safe_load(file)
 
-        # Add switches
         for switch_config in config["switches"]:
             self.addSwitch(switch_config["name"])
 
-        # Add inter-switch links
         for link_config in config["links"]:
             self.addLink(
                 link_config["source"],
@@ -21,7 +19,6 @@ class SpineLeafTopo(Topo):
                 port2=link_config["target_port"],
             )
 
-        # Add hosts
         for host_config in config["hosts"]:
             self.addHost(
                 host_config["name"],
